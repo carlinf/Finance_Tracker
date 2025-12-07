@@ -6,6 +6,7 @@ function Settings() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('profile')
   const [showSignOutModal, setShowSignOutModal] = useState(false)
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [formData, setFormData] = useState({
     fullName: 'John Doe',
     email: 'john@example.com'
@@ -43,14 +44,27 @@ function Settings() {
 
   return (
     <div className="settings-container">
-      <aside className="sidebar">
+      {/* Mobile Menu Overlay */}
+      {isMenuOpen && (
+        <div className="menu-overlay" onClick={() => setIsMenuOpen(false)}></div>
+      )}
+      
+      <aside className={`sidebar ${isMenuOpen ? 'sidebar-open' : ''}`}>
         <div className="sidebar-header">
-          <h2 className="sidebar-title">Finance</h2>
-          <p className="sidebar-subtitle">Personal Tracker</p>
+          <div className="sidebar-header-content">
+            <h2 className="sidebar-title">Finance</h2>
+            <p className="sidebar-subtitle">Personal Tracker</p>
+          </div>
+          <button className="sidebar-close-btn" onClick={() => setIsMenuOpen(false)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
 
         <nav className="sidebar-nav">
-          <Link to="/dashboard" className="nav-item">
+          <Link to="/dashboard" className="nav-item" onClick={() => setIsMenuOpen(false)}>
             <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="7" height="7"></rect>
               <rect x="14" y="3" width="7" height="7"></rect>
@@ -59,14 +73,14 @@ function Settings() {
             </svg>
             Dashboard
           </Link>
-          <Link to="/transactions" className="nav-item">
+          <Link to="/transactions" className="nav-item" onClick={() => setIsMenuOpen(false)}>
             <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
             </svg>
             Transactions
           </Link>
-          <Link to="/categories" className="nav-item">
+          <Link to="/categories" className="nav-item" onClick={() => setIsMenuOpen(false)}>
             <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"></path>
               <line x1="7" y1="7" x2="7.01" y2="7"></line>
@@ -74,7 +88,7 @@ function Settings() {
             </svg>
             Categories
           </Link>
-          <Link to="/analytics" className="nav-item">
+          <Link to="/analytics" className="nav-item" onClick={() => setIsMenuOpen(false)}>
             <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="18" y1="20" x2="18" y2="10"></line>
               <line x1="12" y1="20" x2="12" y2="4"></line>
@@ -82,7 +96,7 @@ function Settings() {
             </svg>
             Analytics
           </Link>
-          <Link to="/settings" className="nav-item active">
+          <Link to="/settings" className="nav-item active" onClick={() => setIsMenuOpen(false)}>
             <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"></path>
               <circle cx="12" cy="12" r="3"></circle>
@@ -103,6 +117,13 @@ function Settings() {
 
       <main className="settings-main">
         <header className="settings-header">
+          <button className="hamburger-btn" onClick={() => setIsMenuOpen(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
           <h1 className="page-title">Settings</h1>
           <div className="user-info">
             <div className="user-details">

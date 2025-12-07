@@ -2,6 +2,8 @@
   min-height: 100vh;
   display: flex;
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .auth-left {
@@ -272,6 +274,67 @@
 
   .auth-right {
     padding: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-container {
+    min-height: 100vh;
+    flex-direction: column;
+  }
+
+  .auth-left {
+    padding: 30px 20px;
+    max-width: 100%;
+  }
+
+  .auth-title {
+    font-size: 28px;
+  }
+
+  .auth-description {
+    font-size: 16px;
+  }
+
+  .auth-right {
+    padding: 20px 16px;
+    width: 100%;
+  }
+
+  .auth-card {
+    padding: 24px;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .auth-tabs {
+    gap: 4px;
+  }
+
+  .auth-tab {
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  .form-group {
+    gap: 6px;
+  }
+
+  .input-wrapper {
+    width: 100%;
+  }
+
+  .input-wrapper input {
+    padding: 10px 14px 10px 44px;
+    font-size: 16px;
+    width: 100%;
+  }
+
+  .btn-primary,
+  .btn-google {
+    padding: 12px;
+    font-size: 15px;
+    width: 100%;
   }
 }
 
