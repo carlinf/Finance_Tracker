@@ -1,32 +1,59 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import { signOutUser } from '../firebase/auth'
+import { subscribeToCategories, addCategory, deleteCategory } from '../firebase/firestore'
 import './Categories.css'
 
 function Categories() {
   const navigate = useNavigate()
+  const { currentUser } = useAuth()
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  
-  const [categories] = useState({
-    income: [
-      { id: 1, name: 'Salary', color: '#10b981' },
-      { id: 2, name: 'Freelance', color: '#3b82f6' }
-    ],
-    expense: [
-      { id: 3, name: 'Food', color: '#ef4444' },
-      { id: 4, name: 'Entertainment', color: '#6b7280' },
-      { id: 5, name: 'Transportation', color: '#ef4444' },
-      { id: 6, name: 'Utilities', color: '#6b7280' }
-    ]
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false)
+  const [formData, setFormData] = useState({
+    name: '',
+    type: 'expense',
+    color: '#10b981'
   })
+  const [submitting, setSubmitting] = useState(false)
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  // Subscribe to categories from Firebase
+  useEffect(() => {
+    if (!currentUser) {
+      setLoading(false)
+      return
+    }
+
+    console.log('Subscribing to categories for user:', currentUser.uid)
+    const unsubscribe = subscribeToCategories(currentUser.uid, (fetchedCategories) => {
+      console.log('Received categories:', fetchedCategories.length, fetchedCategories)
+      setCategories(fetchedCategories)
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
+  }, [currentUser])
+
+  // Separate categories by type
+  const categoriesByType = useMemo(() => {
+    const income = categories.filter(cat => cat.type === 'income')
+    const expense = categories.filter(cat => cat.type === 'expense')
+    return { income, expense }
+  }, [categories])
 
   const handleSignOut = () => {
     setShowSignOutModal(true)
   }
 
-  const confirmSignOut = () => {
-    setShowSignOutModal(false)
-    navigate('/login')
+  const confirmSignOut = async () => {
+    const { error } = await signOutUser()
+    if (!error) {
+      setShowSignOutModal(false)
+      navigate('/login')
+    }
   }
 
   const cancelSignOut = () => {
@@ -38,10 +65,85 @@ function Categories() {
     console.log('Edit category:', categoryId)
   }
 
-  const handleDelete = (categoryId) => {
-    // Handle delete functionality
-    console.log('Delete category:', categoryId)
+  const handleDelete = async (categoryId) => {
+    if (window.confirm('Are you sure you want to delete this category?')) {
+      const { error } = await deleteCategory(categoryId)
+      if (error) {
+        alert('Failed to delete category: ' + error)
+      }
+    }
   }
+
+  const handleOpenAddCategory = () => {
+    setFormData({
+      name: '',
+      type: 'expense',
+      color: '#10b981'
+    })
+    setShowAddCategoryModal(true)
+  }
+
+  const handleCloseAddCategory = () => {
+    setShowAddCategoryModal(false)
+    setFormData({
+      name: '',
+      type: 'expense',
+      color: '#10b981'
+    })
+  }
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+
+  const handleSubmitCategory = async (e) => {
+    e.preventDefault()
+    
+    if (!formData.name.trim()) {
+      alert('Please enter a category name')
+      return
+    }
+
+    if (!currentUser) {
+      alert('You must be logged in to add a category')
+      return
+    }
+
+    setSubmitting(true)
+
+    try {
+      const { error } = await addCategory(currentUser.uid, {
+        name: formData.name.trim(),
+        type: formData.type,
+        color: formData.color
+      })
+      
+      if (error) {
+        alert('Failed to add category: ' + error)
+      } else {
+        handleCloseAddCategory()
+      }
+    } catch (error) {
+      alert('Failed to add category: ' + error.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const colorOptions = [
+    { value: '#10b981', label: 'Green', name: 'green' },
+    { value: '#3b82f6', label: 'Blue', name: 'blue' },
+    { value: '#ef4444', label: 'Red', name: 'red' },
+    { value: '#f59e0b', label: 'Orange', name: 'orange' },
+    { value: '#8b5cf6', label: 'Purple', name: 'purple' },
+    { value: '#ec4899', label: 'Pink', name: 'pink' },
+    { value: '#06b6d4', label: 'Cyan', name: 'cyan' },
+    { value: '#6b7280', label: 'Gray', name: 'gray' }
+  ]
 
   return (
     <div className="categories-container">
@@ -128,8 +230,8 @@ function Categories() {
           <h1 className="page-title">Categories</h1>
           <div className="user-info">
             <div className="user-details">
-              <span className="user-name">John Doe</span>
-              <span className="user-email">john@example.com</span>
+              <span className="user-name">{currentUser?.displayName || 'User'}</span>
+              <span className="user-email">{currentUser?.email || ''}</span>
             </div>
             <div className="user-avatar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -146,7 +248,7 @@ function Categories() {
               <h2 className="categories-page-title">Categories</h2>
               <p className="categories-page-subtitle">Manage your transaction categories</p>
             </div>
-            <button className="btn-add-category">
+            <button className="btn-add-category" onClick={handleOpenAddCategory}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10"></circle>
                 <line x1="12" y1="8" x2="12" y2="16"></line>
@@ -163,18 +265,27 @@ function Categories() {
                   <path d="M20 6L9 17l-5-5"></path>
                 </svg>
                 <h3 className="category-card-title">
-                  Income Categories <span className="category-count income">({categories.income.length})</span>
+                  Income Categories <span className="category-count income">({categoriesByType.income.length})</span>
                 </h3>
               </div>
               <div className="category-list">
-                {categories.income.map((category) => (
+                {loading ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
+                    Loading categories...
+                  </div>
+                ) : categoriesByType.income.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
+                    No income categories yet. Add your first category!
+                  </div>
+                ) : (
+                  categoriesByType.income.map((category) => (
                   <div key={category.id} className="category-item">
                     <div className="category-item-left">
                       <div 
                         className="category-dot" 
                         style={{ backgroundColor: category.color }}
                       ></div>
-                      <span className="category-name">{category.name}</span>
+                      <span className="category-name">{category.name || category.category || 'Unnamed Category'}</span>
                     </div>
                     <div className="category-item-right">
                       <span className="category-tag income">Income</span>
@@ -200,7 +311,8 @@ function Categories() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 
@@ -211,18 +323,27 @@ function Categories() {
                   <line x1="7" y1="7" x2="7.01" y2="7"></line>
                 </svg>
                 <h3 className="category-card-title">
-                  Expense Categories <span className="category-count expense">({categories.expense.length})</span>
+                  Expense Categories <span className="category-count expense">({categoriesByType.expense.length})</span>
                 </h3>
               </div>
               <div className="category-list">
-                {categories.expense.map((category) => (
+                {loading ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
+                    Loading categories...
+                  </div>
+                ) : categoriesByType.expense.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280' }}>
+                    No expense categories yet. Add your first category!
+                  </div>
+                ) : (
+                  categoriesByType.expense.map((category) => (
                   <div key={category.id} className="category-item">
                     <div className="category-item-left">
                       <div 
                         className="category-dot" 
                         style={{ backgroundColor: category.color }}
                       ></div>
-                      <span className="category-name">{category.name}</span>
+                      <span className="category-name">{category.name || category.category || 'Unnamed Category'}</span>
                     </div>
                     <div className="category-item-right">
                       <span className="category-tag expense">Expense</span>
@@ -248,7 +369,8 @@ function Categories() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -271,6 +393,108 @@ function Categories() {
                 Sign Out
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="modal-overlay" onClick={handleCloseAddCategory}>
+          <div className="add-category-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-category-header">
+              <h2 className="add-category-title">Add New Category</h2>
+              <button className="modal-close-btn" onClick={handleCloseAddCategory}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitCategory} className="add-category-form">
+              {/* Name Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Name <span className="required">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  className="form-input"
+                  placeholder="Category name"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  required
+                />
+              </div>
+
+              {/* Type Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Type <span className="required">*</span>
+                </label>
+                <div className="select-wrapper">
+                  <select
+                    name="type"
+                    className="form-select"
+                    value={formData.type}
+                    onChange={handleInputChange}
+                    required
+                  >
+                    <option value="income">Income</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                  <svg className="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </div>
+              </div>
+
+              {/* Color Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Color <span className="required">*</span>
+                </label>
+                <div className="select-wrapper">
+                  <select
+                    name="color"
+                    className="form-select"
+                    value={formData.color}
+                    onChange={handleInputChange}
+                    required
+                  >
+                    {colorOptions.map(color => (
+                      <option key={color.value} value={color.value}>
+                        {color.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="color-preview" style={{ backgroundColor: formData.color }}></div>
+                  <svg className="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </div>
+              </div>
+
+              {/* Form Actions */}
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="form-btn form-btn-cancel"
+                  onClick={handleCloseAddCategory}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="form-btn form-btn-submit"
+                  disabled={submitting}
+                >
+                  {submitting ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

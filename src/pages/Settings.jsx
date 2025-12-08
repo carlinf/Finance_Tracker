@@ -1,26 +1,53 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import { signOutUser } from '../firebase/auth'
+import { getUserProfile, createUserProfile } from '../firebase/firestore'
 import './Settings.css'
 
 function Settings() {
   const navigate = useNavigate()
+  const { currentUser } = useAuth()
   const [activeTab, setActiveTab] = useState('profile')
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [formData, setFormData] = useState({
-    fullName: 'John Doe',
-    email: 'john@example.com'
+    fullName: '',
+    email: ''
   })
   const [currency, setCurrency] = useState('USD')
   const [emailNotifications, setEmailNotifications] = useState(true)
+  const [loading, setLoading] = useState(true)
+
+  // Load user profile data
+  useEffect(() => {
+    if (currentUser) {
+      setFormData({
+        fullName: currentUser.displayName || '',
+        email: currentUser.email || ''
+      })
+      
+      // Load user profile from Firestore
+      getUserProfile(currentUser.uid).then(({ profile, error }) => {
+        if (!error && profile) {
+          setCurrency(profile.currency || 'USD')
+          setEmailNotifications(profile.emailNotifications !== false)
+        }
+        setLoading(false)
+      })
+    }
+  }, [currentUser])
 
   const handleSignOut = () => {
     setShowSignOutModal(true)
   }
 
-  const confirmSignOut = () => {
-    setShowSignOutModal(false)
-    navigate('/login')
+  const confirmSignOut = async () => {
+    const { error } = await signOutUser()
+    if (!error) {
+      setShowSignOutModal(false)
+      navigate('/login')
+    }
   }
 
   const cancelSignOut = () => {
@@ -127,8 +154,8 @@ function Settings() {
           <h1 className="page-title">Settings</h1>
           <div className="user-info">
             <div className="user-details">
-              <span className="user-name">John Doe</span>
-              <span className="user-email">john@example.com</span>
+              <span className="user-name">{currentUser?.displayName || 'User'}</span>
+              <span className="user-email">{currentUser?.email || ''}</span>
             </div>
             <div className="user-avatar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

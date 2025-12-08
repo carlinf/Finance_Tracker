@@ -1,44 +1,150 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { useAuth } from '../contexts/AuthContext'
+import { signOutUser } from '../firebase/auth'
+import { subscribeToTransactions } from '../firebase/firestore'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import './Analytics.css'
 
+// Helper function to assign colors to categories
+const getCategoryColor = (categoryName) => {
+  const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#6b7280']
+  const index = categoryName.charCodeAt(0) % colors.length
+  return colors[index]
+}
+
 function Analytics() {
   const navigate = useNavigate()
+  const { currentUser } = useAuth()
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [transactions, setTransactions] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  // Subscribe to transactions from Firebase
+  useEffect(() => {
+    if (!currentUser) {
+      setLoading(false)
+      return
+    }
+
+    console.log('Subscribing to transactions for analytics:', currentUser.uid)
+    const unsubscribe = subscribeToTransactions(currentUser.uid, (fetchedTransactions) => {
+      setTransactions(fetchedTransactions)
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
+  }, [currentUser])
 
   const handleSignOut = () => {
     setShowSignOutModal(true)
   }
 
-  const confirmSignOut = () => {
-    setShowSignOutModal(false)
-    navigate('/login')
+  const confirmSignOut = async () => {
+    const { error } = await signOutUser()
+    if (!error) {
+      setShowSignOutModal(false)
+      navigate('/login')
+    }
   }
 
   const cancelSignOut = () => {
     setShowSignOutModal(false)
   }
 
-  // Bar chart data for Income vs Expense
-  const barChartData = [
-    { month: 'Jan', income: 4000, expense: 2200 },
-    { month: 'Feb', income: 2800, expense: 1500 },
-    { month: 'Mar', income: 2000, expense: 9800 },
-    { month: 'Apr', income: 2800, expense: 3800 },
-    { month: 'May', income: 2200, expense: 4800 },
-    { month: 'Jun', income: 2000, expense: 3800 }
-  ]
+  // Get current year and calculate year-to-date
+  const currentYear = new Date().getFullYear()
+  const currentMonth = new Date().getMonth()
 
-  // Pie chart data for Spending by Category
-  const pieChartData = [
-    { name: 'Food', value: 450, color: '#10b981' },
-    { name: 'Transportation', value: 320, color: '#3b82f6' },
-    { name: 'Entertainment', value: 280, color: '#f59e0b' },
-    { name: 'Utilities', value: 200, color: '#ef4444' },
-    { name: 'Other', value: 150, color: '#8b5cf6' }
-  ]
+  // Process transactions for analytics
+  const analyticsData = useMemo(() => {
+    // Filter transactions for current year
+    const yearTransactions = transactions.filter(t => {
+      if (!t.createdAt) return false
+      const date = t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt)
+      return date.getFullYear() === currentYear
+    })
+
+    // Separate income and expenses
+    const incomes = yearTransactions.filter(t => (t.amount || 0) > 0)
+    const expenses = yearTransactions.filter(t => (t.amount || 0) < 0)
+
+    // Calculate totals
+    const totalIncome = incomes.reduce((sum, t) => sum + (t.amount || 0), 0)
+    const totalExpense = Math.abs(expenses.reduce((sum, t) => sum + (t.amount || 0), 0))
+
+    // Group by month for bar chart
+    const monthlyData = {}
+    for (let i = 0; i <= currentMonth; i++) {
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      monthlyData[i] = {
+        month: monthNames[i],
+        income: 0,
+        expense: 0
+      }
+    }
+
+    yearTransactions.forEach(t => {
+      if (!t.createdAt) return
+      const date = t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt)
+      const month = date.getMonth()
+      
+      if (month <= currentMonth) {
+        if ((t.amount || 0) > 0) {
+          monthlyData[month].income += t.amount || 0
+        } else {
+          monthlyData[month].expense += Math.abs(t.amount || 0)
+        }
+      }
+    })
+
+    const barChartData = Object.values(monthlyData)
+
+    // Group expenses by category for pie chart
+    const categoryMap = new Map()
+    expenses.forEach(t => {
+      const category = t.category || 'Uncategorized'
+      const amount = Math.abs(t.amount || 0)
+      if (categoryMap.has(category)) {
+        categoryMap.set(category, categoryMap.get(category) + amount)
+      } else {
+        categoryMap.set(category, amount)
+      }
+    })
+
+    // Convert to array and sort by value
+    const pieChartData = Array.from(categoryMap.entries())
+      .map(([name, value]) => ({
+        name,
+        value,
+        color: getCategoryColor(name)
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5) // Top 5 categories
+
+    // Find top spending category
+    const topCategory = pieChartData.length > 0 ? pieChartData[0] : { name: 'N/A', value: 0 }
+
+    // Calculate averages
+    const monthsWithData = barChartData.filter(m => m.income > 0 || m.expense > 0).length || 1
+    const avgMonthlyIncome = totalIncome / monthsWithData
+    const avgMonthlyExpense = totalExpense / monthsWithData
+
+    // Calculate savings rate
+    const savingsRate = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : 0
+
+    return {
+      barChartData,
+      pieChartData,
+      totalIncome,
+      totalExpense,
+      topCategory,
+      avgMonthlyIncome,
+      avgMonthlyExpense,
+      savingsRate
+    }
+  }, [transactions, currentYear, currentMonth])
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -127,8 +233,8 @@ function Analytics() {
           <h1 className="page-title">Analytics</h1>
           <div className="user-info">
             <div className="user-details">
-              <span className="user-name">John Doe</span>
-              <span className="user-email">john@example.com</span>
+              <span className="user-name">{currentUser?.displayName || 'User'}</span>
+              <span className="user-email">{currentUser?.email || ''}</span>
             </div>
             <div className="user-avatar">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -148,135 +254,171 @@ function Analytics() {
           </div>
 
           {/* Key Metrics Cards */}
-          <div className="metrics-grid">
-            <div className="metric-card">
-              <div className="metric-header">
-                <span className="metric-title">Top Category</span>
-                <div className="metric-icon income">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                    <polyline points="17 6 23 6 23 12"></polyline>
-                  </svg>
+          {loading ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+              Loading analytics...
+            </div>
+          ) : (
+            <>
+              <div className="metrics-grid">
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">Top Category</span>
+                    <div className="metric-icon income">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                        <polyline points="17 6 23 6 23 12"></polyline>
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="metric-value">
+                    {analyticsData.topCategory.name === 'N/A' ? 'N/A' : `$${analyticsData.topCategory.value.toFixed(2)}`}
+                  </div>
+                  {analyticsData.topCategory.name !== 'N/A' && (
+                    <div className="metric-subtitle">{analyticsData.topCategory.name}</div>
+                  )}
+                </div>
+
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">Total Income (YTD)</span>
+                    <div className="metric-icon income">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                        <polyline points="17 6 23 6 23 12"></polyline>
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="metric-value income">
+                    ${analyticsData.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+
+                <div className="metric-card">
+                  <div className="metric-header">
+                    <span className="metric-title">Total Expense (YTD)</span>
+                    <div className="metric-icon expense">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline>
+                        <polyline points="17 18 23 18 23 12"></polyline>
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="metric-value expense">
+                    ${analyticsData.totalExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
                 </div>
               </div>
-              <div className="metric-value">$450.00</div>
-            </div>
 
-            <div className="metric-card">
-              <div className="metric-header">
-                <span className="metric-title">Total Income (YTD)</span>
-                <div className="metric-icon income">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                    <polyline points="17 6 23 6 23 12"></polyline>
-                  </svg>
+              {/* Charts Grid */}
+              <div className="charts-grid">
+                <div className="chart-card">
+                  <h3 className="chart-title">Income vs Expense</h3>
+                  <div className="chart-container">
+                    {analyticsData.barChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={analyticsData.barChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis 
+                            dataKey="month" 
+                            stroke="#6b7280"
+                            style={{ fontSize: '12px' }}
+                          />
+                          <YAxis 
+                            stroke="#6b7280"
+                            style={{ fontSize: '12px' }}
+                          />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'white', 
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '8px',
+                              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                            }}
+                            formatter={(value) => `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          />
+                          <Legend 
+                            wrapperStyle={{ paddingTop: '20px' }}
+                            iconType="square"
+                          />
+                          <Bar dataKey="income" fill="#10b981" radius={[8, 8, 0, 0]} />
+                          <Bar dataKey="expense" fill="#ef4444" radius={[8, 8, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                        No transaction data available for this year
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="chart-card">
+                  <h3 className="chart-title">Spending by Category</h3>
+                  <div className="chart-container">
+                    {analyticsData.pieChartData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                          <Pie
+                            data={analyticsData.pieChartData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={true}
+                            label={({ name, value }) => `${name}: $${value.toFixed(2)}`}
+                            outerRadius={100}
+                            fill="#8884d8"
+                            dataKey="value"
+                          >
+                            {analyticsData.pieChartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'white', 
+                              border: '1px solid #e5e7eb',
+                              borderRadius: '8px',
+                              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                            }}
+                            formatter={(value) => `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+                        No expense categories found
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-              <div className="metric-value income">$20,940.00</div>
-            </div>
 
-            <div className="metric-card">
-              <div className="metric-header">
-                <span className="metric-title">Total Expense (YTD)</span>
-                <div className="metric-icon expense">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline>
-                    <polyline points="17 18 23 18 23 12"></polyline>
-                  </svg>
+              {/* Summary Card */}
+              <div className="summary-card">
+                <h3 className="chart-title">Summary</h3>
+                <div className="summary-metrics">
+                  <div className="summary-metric">
+                    <span className="summary-label">Savings Rate</span>
+                    <span className={`summary-value ${analyticsData.savingsRate >= 0 ? 'income' : 'expense'}`}>
+                      {analyticsData.savingsRate.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="summary-metric">
+                    <span className="summary-label">Average Monthly Expense</span>
+                    <span className="summary-value expense">
+                      ${analyticsData.avgMonthlyExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="summary-metric">
+                    <span className="summary-label">Average Monthly Income</span>
+                    <span className="summary-value income">
+                      ${analyticsData.avgMonthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="metric-value expense">$10,606.00</div>
-            </div>
-          </div>
-
-          {/* Charts Grid */}
-          <div className="charts-grid">
-            <div className="chart-card">
-              <h3 className="chart-title">Income vs Expense</h3>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={barChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis 
-                      dataKey="month" 
-                      stroke="#6b7280"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis 
-                      stroke="#6b7280"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'white', 
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                      }}
-                    />
-                    <Legend 
-                      wrapperStyle={{ paddingTop: '20px' }}
-                      iconType="square"
-                    />
-                    <Bar dataKey="income" fill="#10b981" radius={[8, 8, 0, 0]} />
-                    <Bar dataKey="expense" fill="#ef4444" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <div className="chart-card">
-              <h3 className="chart-title">Spending by Category</h3>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={true}
-                      label={({ name, value }) => `${name}: $${value.toFixed(2)}`}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'white', 
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                      }}
-                      formatter={(value) => `$${value.toFixed(2)}`}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          {/* Summary Card */}
-          <div className="summary-card">
-            <h3 className="chart-title">Summary</h3>
-            <div className="summary-metrics">
-              <div className="summary-metric">
-                <span className="summary-label">Savings Rate</span>
-                <span className="summary-value income">52%</span>
-              </div>
-              <div className="summary-metric">
-                <span className="summary-label">Average Monthly Expense</span>
-                <span className="summary-value">$1,767.67</span>
-              </div>
-              <div className="summary-metric">
-                <span className="summary-label">Average Monthly Income</span>
-                <span className="summary-value">$3,490.00</span>
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </div>
       </main>
 

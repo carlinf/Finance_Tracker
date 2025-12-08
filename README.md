@@ -93,13 +93,12 @@ Finance_Tracker/
 
 ## Future Enhancements
 
-- Backend integration for real user authentication
-- Database integration for persistent data storage
 - Add/edit/delete transaction functionality
 - Category management
 - Advanced analytics and reporting
 - Data export functionality
 - Dark mode support
+- Budget tracking and alerts
 
 ## License
 
