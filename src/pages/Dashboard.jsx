@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
+import { useCurrency } from '../contexts/CurrencyContext'
 import { signOutUser } from '../firebase/auth'
 import { subscribeToTransactions, addTransaction, getCategories } from '../firebase/firestore'
 import './Dashboard.css'
@@ -9,6 +10,7 @@ import './Dashboard.css'
 function Dashboard() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { formatCurrency } = useCurrency()
   const [chartData, setChartData] = useState([])
   const [transactions, setTransactions] = useState([])
   const [showSignOutModal, setShowSignOutModal] = useState(false)
@@ -489,9 +491,9 @@ function Dashboard() {
             <div className="summary-card">
               <div className="card-header">
                 <span className="card-title">Total Balance</span>
-                <span className="card-icon">$</span>
+                <span className="card-icon">{formatCurrency(0).symbol}</span>
               </div>
-              <div className="card-amount">${totalBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="card-amount">{formatCurrency(totalBalance).formattedWithSymbol}</div>
             </div>
 
             <div className="summary-card">
@@ -502,7 +504,7 @@ function Dashboard() {
                   <polyline points="17 6 23 6 23 12"></polyline>
                 </svg>
               </div>
-              <div className="card-amount income">+${monthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="card-amount income">+{formatCurrency(monthlyIncome).formattedWithSymbol}</div>
             </div>
 
             <div className="summary-card">
@@ -513,7 +515,7 @@ function Dashboard() {
                   <polyline points="17 18 23 18 23 12"></polyline>
                 </svg>
               </div>
-              <div className="card-amount expense">-${monthlyExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="card-amount expense">-{formatCurrency(monthlyExpense).formattedWithSymbol}</div>
             </div>
           </div>
 
@@ -541,6 +543,7 @@ function Dashboard() {
                       borderRadius: '8px',
                       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
                     }}
+                    formatter={(value) => formatCurrency(value).formattedWithSymbol}
                   />
                   <Line 
                     type="monotone" 
@@ -587,7 +590,7 @@ function Dashboard() {
                       <div className="transaction-category">{transaction.category || 'Uncategorized'}</div>
                     </div>
                     <div className={`transaction-amount ${(transaction.amount || 0) > 0 ? 'income' : 'expense'}`}>
-                      {(transaction.amount || 0) > 0 ? '+' : ''}${Math.abs(transaction.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {(transaction.amount || 0) > 0 ? '+' : ''}{formatCurrency(Math.abs(transaction.amount || 0)).formattedWithSymbol}
                     </div>
                     <div className="transaction-date">{formatDate(transaction.createdAt)}</div>
                   </div>
@@ -660,7 +663,7 @@ function Dashboard() {
                   Amount <span className="required">*</span>
                 </label>
                 <div className="amount-input-wrapper">
-                  <span className="amount-prefix">$</span>
+                  <span className="amount-prefix">{formatCurrency(0).symbol}</span>
                   <input
                     type="number"
                     name="amount"

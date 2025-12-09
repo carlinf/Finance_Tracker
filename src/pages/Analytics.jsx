@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useCurrency } from '../contexts/CurrencyContext'
 import { signOutUser } from '../firebase/auth'
 import { subscribeToTransactions } from '../firebase/firestore'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
@@ -16,6 +17,7 @@ const getCategoryColor = (categoryName) => {
 function Analytics() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { formatCurrency } = useCurrency()
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [transactions, setTransactions] = useState([])
@@ -272,7 +274,7 @@ function Analytics() {
                     </div>
                   </div>
                   <div className="metric-value">
-                    {analyticsData.topCategory.name === 'N/A' ? 'N/A' : `$${analyticsData.topCategory.value.toFixed(2)}`}
+                    {analyticsData.topCategory.name === 'N/A' ? 'N/A' : formatCurrency(analyticsData.topCategory.value).formattedWithSymbol}
                   </div>
                   {analyticsData.topCategory.name !== 'N/A' && (
                     <div className="metric-subtitle">{analyticsData.topCategory.name}</div>
@@ -290,7 +292,7 @@ function Analytics() {
                     </div>
                   </div>
                   <div className="metric-value income">
-                    ${analyticsData.totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(analyticsData.totalIncome).formattedWithSymbol}
                   </div>
                 </div>
 
@@ -305,7 +307,7 @@ function Analytics() {
                     </div>
                   </div>
                   <div className="metric-value expense">
-                    ${analyticsData.totalExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(analyticsData.totalExpense).formattedWithSymbol}
                   </div>
                 </div>
               </div>
@@ -335,7 +337,7 @@ function Analytics() {
                               borderRadius: '8px',
                               boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
                             }}
-                            formatter={(value) => `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            formatter={(value) => formatCurrency(Number(value)).formattedWithSymbol}
                           />
                           <Legend 
                             wrapperStyle={{ paddingTop: '20px' }}
@@ -364,7 +366,7 @@ function Analytics() {
                             cx="50%"
                             cy="50%"
                             labelLine={true}
-                            label={({ name, value }) => `${name}: $${value.toFixed(2)}`}
+                            label={({ name, value }) => `${name}: ${formatCurrency(value).formattedWithSymbol}`}
                             outerRadius={100}
                             fill="#8884d8"
                             dataKey="value"
@@ -380,7 +382,7 @@ function Analytics() {
                               borderRadius: '8px',
                               boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
                             }}
-                            formatter={(value) => `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            formatter={(value) => formatCurrency(Number(value)).formattedWithSymbol}
                           />
                         </PieChart>
                       </ResponsiveContainer>
@@ -406,13 +408,13 @@ function Analytics() {
                   <div className="summary-metric">
                     <span className="summary-label">Average Monthly Expense</span>
                     <span className="summary-value expense">
-                      ${analyticsData.avgMonthlyExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatCurrency(analyticsData.avgMonthlyExpense).formattedWithSymbol}
                     </span>
                   </div>
                   <div className="summary-metric">
                     <span className="summary-label">Average Monthly Income</span>
                     <span className="summary-value income">
-                      ${analyticsData.avgMonthlyIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatCurrency(analyticsData.avgMonthlyIncome).formattedWithSymbol}
                     </span>
                   </div>
                 </div>

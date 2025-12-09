@@ -269,3 +269,66 @@ export const getUserProfile = async (userId) => {
     return { profile: null, error: error.message }
   }
 }
+
+// Delete all user data (transactions, categories, and user profile)
+export const deleteAllUserData = async (userId) => {
+  try {
+    const errors = []
+
+    // Delete all transactions
+    try {
+      const transactionsQuery = query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where('userId', '==', userId)
+      )
+      const transactionsSnapshot = await getDocs(transactionsQuery)
+      const deleteTransactionPromises = transactionsSnapshot.docs.map(doc => 
+        deleteDoc(doc.ref)
+      )
+      await Promise.all(deleteTransactionPromises)
+    } catch (error) {
+      errors.push(`Failed to delete transactions: ${error.message}`)
+    }
+
+    // Delete all categories
+    try {
+      const categoriesQuery = query(
+        collection(db, CATEGORIES_COLLECTION),
+        where('userId', '==', userId)
+      )
+      const categoriesSnapshot = await getDocs(categoriesQuery)
+      const deleteCategoryPromises = categoriesSnapshot.docs.map(doc => 
+        deleteDoc(doc.ref)
+      )
+      await Promise.all(deleteCategoryPromises)
+    } catch (error) {
+      errors.push(`Failed to delete categories: ${error.message}`)
+    }
+
+    // Delete user profile
+    try {
+      const userProfileQuery = query(
+        collection(db, USERS_COLLECTION),
+        where('userId', '==', userId),
+        limit(1)
+      )
+      const userProfileSnapshot = await getDocs(userProfileQuery)
+      if (!userProfileSnapshot.empty) {
+        const deleteProfilePromises = userProfileSnapshot.docs.map(doc => 
+          deleteDoc(doc.ref)
+        )
+        await Promise.all(deleteProfilePromises)
+      }
+    } catch (error) {
+      errors.push(`Failed to delete user profile: ${error.message}`)
+    }
+
+    if (errors.length > 0) {
+      return { error: errors.join('; ') }
+    }
+
+    return { error: null }
+  } catch (error) {
+    return { error: error.message }
+  }
+}

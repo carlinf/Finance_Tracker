@@ -815,11 +815,39 @@
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 }
 
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: #6b7280;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close-btn:hover {
+  color: #1f2937;
+}
+
+.modal-close-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
 .modal-title {
   font-size: 20px;
   font-weight: 700;
   color: #1f2937;
-  margin: 0 0 12px 0;
+  margin: 0;
 }
 
 .modal-message {
@@ -865,6 +893,54 @@
   background: #dc2626;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.modal-btn-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.modal-btn-submit {
+  background: #10b981;
+  color: white;
+}
+
+.modal-btn-submit:hover {
+  background: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.modal-btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.modal-btn-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.password-form .form-group {
+  margin-bottom: 0;
+}
+
+.error-message {
+  padding: 10px;
+  margin-bottom: 15px;
+  background-color: #fee2e2;
+  color: #dc2626;
+  border-radius: 6px;
+  font-size: 14px;
+  border: 1px solid #fecaca;
 }
 
 @media (max-width: 480px) {

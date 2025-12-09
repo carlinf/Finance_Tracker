@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { signOutUser } from '../firebase/auth'
-import { getUserProfile, createUserProfile } from '../firebase/firestore'
+import { useCurrency } from '../contexts/CurrencyContext'
+import { signOutUser, updateUserPassword, deleteUserAccount } from '../firebase/auth'
+import { getUserProfile, createUserProfile, deleteAllUserData } from '../firebase/firestore'
 import './Settings.css'
 
 function Settings() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { currency, updateCurrency } = useCurrency()
   const [activeTab, setActiveTab] = useState('profile')
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -15,9 +17,26 @@ function Settings() {
     fullName: '',
     email: ''
   })
-  const [currency, setCurrency] = useState('USD')
+  const [localCurrency, setLocalCurrency] = useState(currency)
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  })
+  const [passwordError, setPasswordError] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false)
+  const [deletingAccount, setDeletingAccount] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
+  // Sync localCurrency with context currency
+  useEffect(() => {
+    setLocalCurrency(currency)
+  }, [currency])
 
   // Load user profile data
   useEffect(() => {
@@ -30,7 +49,8 @@ function Settings() {
       // Load user profile from Firestore
       getUserProfile(currentUser.uid).then(({ profile, error }) => {
         if (!error && profile) {
-          setCurrency(profile.currency || 'USD')
+          const userCurrency = profile.currency || 'USD'
+          setLocalCurrency(userCurrency)
           setEmailNotifications(profile.emailNotifications !== false)
         }
         setLoading(false)
@@ -62,10 +82,132 @@ function Settings() {
   }
 
   const handleDeleteAccount = () => {
-    if (window.confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-      // Handle account deletion
-      console.log('Account deleted')
+    setShowDeleteAccountModal(true)
+    setDeleteError('')
+  }
+
+  const handleCloseDeleteModal = () => {
+    setShowDeleteAccountModal(false)
+    setDeleteError('')
+  }
+
+  const confirmDeleteAccount = async () => {
+    if (!currentUser) {
+      setDeleteError('You must be logged in to delete your account')
+      return
+    }
+
+    setDeletingAccount(true)
+    setDeleteError('')
+
+    try {
+      // Step 1: Delete all user data from Firestore
+      const { error: firestoreError } = await deleteAllUserData(currentUser.uid)
+      
+      if (firestoreError) {
+        console.error('Error deleting user data:', firestoreError)
+        // Continue with account deletion even if Firestore deletion fails
+        // (some data might have been deleted)
+      }
+
+      // Step 2: Delete the Firebase Authentication account
+      const { error: authError } = await deleteUserAccount()
+      
+      if (authError) {
+        setDeleteError(authError)
+        setDeletingAccount(false)
+        return
+      }
+
+      // Success - redirect to login
       navigate('/login')
+    } catch (error) {
+      setDeleteError(error.message || 'Failed to delete account. Please try again.')
+      setDeletingAccount(false)
+    }
+  }
+
+  const handleOpenPasswordModal = () => {
+    setShowPasswordModal(true)
+    setPasswordData({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    })
+    setPasswordError('')
+  }
+
+  const handleClosePasswordModal = () => {
+    setShowPasswordModal(false)
+    setPasswordData({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    })
+    setPasswordError('')
+  }
+
+  const handlePasswordChange = (e) => {
+    const { name, value } = e.target
+    setPasswordData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+    // Clear error when user starts typing
+    if (passwordError) {
+      setPasswordError('')
+    }
+  }
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault()
+    setPasswordError('')
+
+    // Validation
+    if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
+      setPasswordError('Please fill in all fields')
+      return
+    }
+
+    if (passwordData.newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters long')
+      return
+    }
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setPasswordError('New passwords do not match')
+      return
+    }
+
+    if (passwordData.currentPassword === passwordData.newPassword) {
+      setPasswordError('New password must be different from current password')
+      return
+    }
+
+    if (!currentUser) {
+      setPasswordError('You must be logged in to change your password')
+      return
+    }
+
+    setChangingPassword(true)
+
+    try {
+      const { error } = await updateUserPassword(
+        passwordData.currentPassword,
+        passwordData.newPassword
+      )
+
+      if (error) {
+        setPasswordError(error)
+      } else {
+        // Success - close modal and show success message
+        alert('Password changed successfully!')
+        handleClosePasswordModal()
+      }
+    } catch (error) {
+      setPasswordError(error.message || 'Failed to change password')
+    } finally {
+      setChangingPassword(false)
     }
   }
 
@@ -234,7 +376,11 @@ function Settings() {
                 <label className="form-label">Password</label>
                 <div className="password-section">
                   <span className="password-description">Change your password</span>
-                  <button className="btn-change-password">
+                  <button 
+                    type="button"
+                    className="btn-change-password"
+                    onClick={handleOpenPasswordModal}
+                  >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                       <path d="M7 11V7a5 5 0 0110 0v4"></path>
@@ -256,8 +402,29 @@ function Settings() {
                   <select
                     id="currency"
                     className="form-select"
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value)}
+                    value={localCurrency}
+                    onChange={async (e) => {
+                      const newCurrency = e.target.value
+                      setLocalCurrency(newCurrency)
+                      setSaving(true)
+                      
+                      // Update in Firestore
+                      const { error } = await createUserProfile(currentUser.uid, {
+                        currency: newCurrency,
+                        emailNotifications: emailNotifications
+                      })
+                      
+                      if (!error) {
+                        // Update context to propagate change across app
+                        updateCurrency(newCurrency)
+                      } else {
+                        alert('Failed to save currency preference: ' + error)
+                        setLocalCurrency(currency) // Revert on error
+                      }
+                      
+                      setSaving(false)
+                    }}
+                    disabled={saving}
                   >
                     <option value="USD">US Dollar (USD)</option>
                     <option value="EUR">Euro (EUR)</option>
@@ -326,6 +493,160 @@ function Settings() {
               <button className="modal-btn modal-btn-confirm" onClick={confirmSignOut}>
                 Sign Out
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showPasswordModal && (
+        <div className="modal-overlay" onClick={handleClosePasswordModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Change Password</h2>
+              <button className="modal-close-btn" onClick={handleClosePasswordModal}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleChangePassword} className="password-form">
+              {passwordError && (
+                <div className="error-message" style={{ 
+                  padding: '10px', 
+                  marginBottom: '15px', 
+                  backgroundColor: '#fee2e2', 
+                  color: '#dc2626', 
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}>
+                  {passwordError}
+                </div>
+              )}
+              
+              <div className="form-group">
+                <label htmlFor="currentPassword" className="form-label">
+                  Current Password <span className="required">*</span>
+                </label>
+                <input
+                  type="password"
+                  id="currentPassword"
+                  name="currentPassword"
+                  className="form-input"
+                  value={passwordData.currentPassword}
+                  onChange={handlePasswordChange}
+                  placeholder="Enter your current password"
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="newPassword" className="form-label">
+                  New Password <span className="required">*</span>
+                </label>
+                <input
+                  type="password"
+                  id="newPassword"
+                  name="newPassword"
+                  className="form-input"
+                  value={passwordData.newPassword}
+                  onChange={handlePasswordChange}
+                  placeholder="Enter your new password (min. 6 characters)"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="confirmPassword" className="form-label">
+                  Confirm New Password <span className="required">*</span>
+                </label>
+                <input
+                  type="password"
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  className="form-input"
+                  value={passwordData.confirmPassword}
+                  onChange={handlePasswordChange}
+                  placeholder="Confirm your new password"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button 
+                  type="button"
+                  className="modal-btn modal-btn-cancel" 
+                  onClick={handleClosePasswordModal}
+                  disabled={changingPassword}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="modal-btn modal-btn-submit" 
+                  disabled={changingPassword}
+                >
+                  {changingPassword ? 'Changing...' : 'Change Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Account Modal */}
+      {showDeleteAccountModal && (
+        <div className="modal-overlay" onClick={handleCloseDeleteModal}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Delete Account</h2>
+              <button className="modal-close-btn" onClick={handleCloseDeleteModal} disabled={deletingAccount}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div>
+              {deleteError && (
+                <div className="error-message" style={{ 
+                  padding: '10px', 
+                  marginBottom: '15px', 
+                  backgroundColor: '#fee2e2', 
+                  color: '#dc2626', 
+                  borderRadius: '6px',
+                  fontSize: '14px'
+                }}>
+                  {deleteError}
+                </div>
+              )}
+              <p className="modal-message" style={{ color: '#dc2626', fontWeight: '600' }}>
+                Are you sure you want to delete your account? This action cannot be undone.
+              </p>
+              <p className="modal-message" style={{ fontSize: '13px', marginTop: '10px' }}>
+                This will permanently delete all your data including transactions, categories, and profile information.
+              </p>
+              <div className="modal-actions" style={{ marginTop: '24px' }}>
+                <button 
+                  type="button"
+                  className="modal-btn modal-btn-cancel" 
+                  onClick={handleCloseDeleteModal}
+                  disabled={deletingAccount}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button"
+                  className="modal-btn modal-btn-confirm" 
+                  onClick={confirmDeleteAccount}
+                  disabled={deletingAccount}
+                >
+                  {deletingAccount ? 'Deleting...' : 'Yes, Delete Account'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

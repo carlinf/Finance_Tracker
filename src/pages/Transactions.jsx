@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useCurrency } from '../contexts/CurrencyContext'
 import { signOutUser } from '../firebase/auth'
 import { subscribeToTransactions, deleteTransaction, addTransaction, getCategories } from '../firebase/firestore'
 import './Transactions.css'
@@ -8,6 +9,7 @@ import './Transactions.css'
 function Transactions() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { formatCurrency } = useCurrency()
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -507,7 +509,7 @@ function Transactions() {
                 <span className="card-title">Total Income</span>
                 <span className="card-badge income-badge">+{incomeCount}</span>
               </div>
-              <div className="card-amount income">${totalIncome.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="card-amount income">{formatCurrency(totalIncome).formattedWithSymbol}</div>
             </div>
 
             <div className="summary-card expense-card">
@@ -515,7 +517,7 @@ function Transactions() {
                 <span className="card-title">Total Expense</span>
                 <span className="card-badge expense-badge">{expenseCount}</span>
               </div>
-              <div className="card-amount expense">${totalExpense.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              <div className="card-amount expense">{formatCurrency(totalExpense).formattedWithSymbol}</div>
             </div>
 
             <div className="summary-card balance-card">
@@ -524,7 +526,7 @@ function Transactions() {
                 <span className="card-badge neutral-badge">{transactions.length} total</span>
               </div>
               <div className={`card-amount ${netBalance >= 0 ? 'income' : 'expense'}`}>
-                ${netBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatCurrency(Math.abs(netBalance)).formattedWithSymbol}
               </div>
             </div>
           </div>
@@ -600,7 +602,7 @@ function Transactions() {
                     </div>
                     <div className="transaction-amount-wrapper">
                       <div className={`transaction-amount ${isIncome ? 'income' : 'expense'}`}>
-                        {isIncome ? '+' : ''}${Math.abs(transaction.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {isIncome ? '+' : ''}{formatCurrency(Math.abs(transaction.amount || 0)).formattedWithSymbol}
                       </div>
                       <span className={`transaction-badge ${isIncome ? 'income' : 'expense'}`}>
                         {isIncome ? 'income' : 'expense'}
@@ -694,7 +696,7 @@ function Transactions() {
                   Amount <span className="required">*</span>
                 </label>
                 <div className="amount-input-wrapper">
-                  <span className="amount-prefix">$</span>
+                  <span className="amount-prefix">{formatCurrency(0).symbol}</span>
                   <input
                     type="number"
                     name="amount"
