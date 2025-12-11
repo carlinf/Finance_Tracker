@@ -1,16 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useCurrency } from '../contexts/CurrencyContext'
 import { signOutUser } from '../firebase/auth'
+import { subscribeToTransactions } from '../firebase/firestore'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import './Analytics.css'
 
 function Analytics() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { formatCurrency } = useCurrency()
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false)
+  const [transactions, setTransactions] = useState([])
+  const [loading, setLoading] = useState(true)
 
   const handleSignOut = () => {
     setShowSignOutModal(true)
@@ -44,24 +49,157 @@ function Analytics() {
     setShowSignOutModal(false)
   }
 
-  // Bar chart data for Income vs Expense
-  const barChartData = [
-    { month: 'Jan', income: 4000, expense: 2200 },
-    { month: 'Feb', income: 2800, expense: 1500 },
-    { month: 'Mar', income: 2000, expense: 9800 },
-    { month: 'Apr', income: 2800, expense: 3800 },
-    { month: 'May', income: 2200, expense: 4800 },
-    { month: 'Jun', income: 2000, expense: 3800 }
-  ]
+  // Subscribe to transactions from Firebase
+  useEffect(() => {
+    if (!currentUser) {
+      setLoading(false)
+      return
+    }
 
-  // Pie chart data for Spending by Category
-  const pieChartData = [
-    { name: 'Food', value: 450, color: '#10b981' },
-    { name: 'Transportation', value: 320, color: '#3b82f6' },
-    { name: 'Entertainment', value: 280, color: '#f59e0b' },
-    { name: 'Utilities', value: 200, color: '#ef4444' },
-    { name: 'Other', value: 150, color: '#8b5cf6' }
-  ]
+    const unsubscribe = subscribeToTransactions(currentUser.uid, (fetchedTransactions) => {
+      setTransactions(fetchedTransactions)
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
+  }, [currentUser])
+
+  // Calculate bar chart data (Income vs Expense by month)
+  const barChartData = useMemo(() => {
+    const currentYear = new Date().getFullYear()
+    const monthMap = new Map()
+    
+    // Initialize last 6 months
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    const currentMonth = new Date().getMonth()
+    const last6Months = []
+    
+    for (let i = 5; i >= 0; i--) {
+      const monthIndex = (currentMonth - i + 12) % 12
+      const monthName = months[monthIndex]
+      monthMap.set(monthIndex, { month: monthName, income: 0, expense: 0 })
+      last6Months.push(monthIndex)
+    }
+
+    // Process transactions
+    transactions.forEach(transaction => {
+      const date = transaction.createdAt?.toDate() || transaction.date?.toDate() || new Date()
+      if (date.getFullYear() === currentYear) {
+        const monthIndex = date.getMonth()
+        const amount = transaction.amount || 0
+        
+        if (monthMap.has(monthIndex)) {
+          const monthData = monthMap.get(monthIndex)
+          if (amount > 0) {
+            monthData.income += amount
+          } else {
+            monthData.expense += Math.abs(amount)
+          }
+        }
+      }
+    })
+
+    return last6Months.map(monthIndex => monthMap.get(monthIndex))
+  }, [transactions])
+
+  // Calculate pie chart data (Spending by Category)
+  const pieChartData = useMemo(() => {
+    const categoryMap = new Map()
+    const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#6b7280']
+    let colorIndex = 0
+
+    transactions.forEach(transaction => {
+      const amount = transaction.amount || 0
+      if (amount < 0) {
+        const category = transaction.category || 'Uncategorized'
+        const expense = Math.abs(amount)
+        
+        if (categoryMap.has(category)) {
+          categoryMap.set(category, categoryMap.get(category) + expense)
+        } else {
+          categoryMap.set(category, expense)
+        }
+      }
+    })
+
+    // Convert to array and sort by value
+    const data = Array.from(categoryMap.entries())
+      .map(([name, value], index) => ({
+        name,
+        value: Math.round(value * 100) / 100,
+        color: COLORS[index % COLORS.length]
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 8) // Top 8 categories
+
+    return data
+  }, [transactions])
+
+  // Calculate metrics
+  const metrics = useMemo(() => {
+    const currentYear = new Date().getFullYear()
+    const currentDate = new Date()
+    
+    // Filter transactions for current year
+    const ytdTransactions = transactions.filter(t => {
+      const date = t.createdAt?.toDate() || t.date?.toDate() || new Date()
+      return date.getFullYear() === currentYear
+    })
+
+    // Calculate YTD totals
+    const ytdIncome = ytdTransactions
+      .filter(t => (t.amount || 0) > 0)
+      .reduce((sum, t) => sum + (t.amount || 0), 0)
+    
+    const ytdExpense = Math.abs(ytdTransactions
+      .filter(t => (t.amount || 0) < 0)
+      .reduce((sum, t) => sum + (t.amount || 0), 0))
+
+    // Top category
+    const categoryTotals = new Map()
+    transactions.forEach(t => {
+      if ((t.amount || 0) < 0) {
+        const category = t.category || 'Uncategorized'
+        const expense = Math.abs(t.amount || 0)
+        categoryTotals.set(category, (categoryTotals.get(category) || 0) + expense)
+      }
+    })
+    
+    let topCategory = { name: 'N/A', value: 0 }
+    categoryTotals.forEach((value, name) => {
+      if (value > topCategory.value) {
+        topCategory = { name, value }
+      }
+    })
+
+    // Calculate monthly averages
+    const monthsWithData = new Set()
+    ytdTransactions.forEach(t => {
+      const date = t.createdAt?.toDate() || t.date?.toDate() || new Date()
+      monthsWithData.add(date.getMonth())
+    })
+    const monthCount = Math.max(monthsWithData.size, 1)
+    
+    const avgMonthlyIncome = ytdIncome / monthCount
+    const avgMonthlyExpense = ytdExpense / monthCount
+
+    // Savings rate
+    const savingsRate = ytdIncome > 0 
+      ? Math.round(((ytdIncome - ytdExpense) / ytdIncome) * 100)
+      : 0
+
+    return {
+      topCategory: {
+        name: topCategory.name,
+        value: Math.round(topCategory.value * 100) / 100
+      },
+      ytdIncome: Math.round(ytdIncome * 100) / 100,
+      ytdExpense: Math.round(ytdExpense * 100) / 100,
+      avgMonthlyIncome: Math.round(avgMonthlyIncome * 100) / 100,
+      avgMonthlyExpense: Math.round(avgMonthlyExpense * 100) / 100,
+      savingsRate
+    }
+  }, [transactions])
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']
 
@@ -194,7 +332,14 @@ function Analytics() {
                   </svg>
                 </div>
               </div>
-              <div className="metric-value">$450.00</div>
+              <div className="metric-value">
+                {loading ? 'Loading...' : formatCurrency(metrics.topCategory.value)}
+              </div>
+              {!loading && metrics.topCategory.name !== 'N/A' && (
+                <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+                  {metrics.topCategory.name}
+                </div>
+              )}
             </div>
 
             <div className="metric-card">
@@ -207,7 +352,9 @@ function Analytics() {
                   </svg>
                 </div>
               </div>
-              <div className="metric-value income">$20,940.00</div>
+              <div className="metric-value income">
+                {loading ? 'Loading...' : formatCurrency(metrics.ytdIncome)}
+              </div>
             </div>
 
             <div className="metric-card">
@@ -220,7 +367,9 @@ function Analytics() {
                   </svg>
                 </div>
               </div>
-              <div className="metric-value expense">$10,606.00</div>
+              <div className="metric-value expense">
+                {loading ? 'Loading...' : formatCurrency(metrics.ytdExpense)}
+              </div>
             </div>
           </div>
 
@@ -229,67 +378,88 @@ function Analytics() {
             <div className="chart-card">
               <h3 className="chart-title">Income vs Expense</h3>
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={barChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis 
-                      dataKey="month" 
-                      stroke="#6b7280"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <YAxis 
-                      stroke="#6b7280"
-                      style={{ fontSize: '12px' }}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'white', 
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                      }}
-                    />
-                    <Legend 
-                      wrapperStyle={{ paddingTop: '20px' }}
-                      iconType="square"
-                    />
-                    <Bar dataKey="income" fill="#10b981" radius={[8, 8, 0, 0]} />
-                    <Bar dataKey="expense" fill="#ef4444" radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                {loading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: '#6b7280' }}>
+                    Loading chart data...
+                  </div>
+                ) : barChartData.length === 0 || barChartData.every(d => d.income === 0 && d.expense === 0) ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: '#6b7280' }}>
+                    No transaction data available for the last 6 months
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={barChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis 
+                        dataKey="month" 
+                        stroke="#6b7280"
+                        style={{ fontSize: '12px' }}
+                      />
+                      <YAxis 
+                        stroke="#6b7280"
+                        style={{ fontSize: '12px' }}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'white', 
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                        }}
+                        formatter={(value) => formatCurrency(value)}
+                      />
+                      <Legend 
+                        wrapperStyle={{ paddingTop: '20px' }}
+                        iconType="square"
+                      />
+                      <Bar dataKey="income" fill="#10b981" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="expense" fill="#ef4444" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 
             <div className="chart-card">
               <h3 className="chart-title">Spending by Category</h3>
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={true}
-                      label={({ name, value }) => `${name}: $${value.toFixed(2)}`}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {pieChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'white', 
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
-                      }}
-                      formatter={(value) => `$${value.toFixed(2)}`}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                {loading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: '#6b7280' }}>
+                    Loading chart data...
+                  </div>
+                ) : pieChartData.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '300px', color: '#6b7280' }}>
+                    No expense data available
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={true}
+                        label={({ name, value }) => `${name}: ${formatCurrency(value)}`}
+                        outerRadius={100}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {pieChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: 'white', 
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '8px',
+                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                        }}
+                        formatter={(value) => formatCurrency(value)}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
           </div>
@@ -297,18 +467,24 @@ function Analytics() {
           {/* Summary Card */}
           <div className="summary-card">
             <h3 className="chart-title">Summary</h3>
-            <div className="summary-metrics">
+              <div className="summary-metrics">
               <div className="summary-metric">
                 <span className="summary-label">Savings Rate</span>
-                <span className="summary-value income">52%</span>
+                <span className="summary-value income">
+                  {loading ? 'Loading...' : `${metrics.savingsRate}%`}
+                </span>
               </div>
               <div className="summary-metric">
                 <span className="summary-label">Average Monthly Expense</span>
-                <span className="summary-value">$1,767.67</span>
+                <span className="summary-value">
+                  {loading ? 'Loading...' : formatCurrency(metrics.avgMonthlyExpense)}
+                </span>
               </div>
               <div className="summary-metric">
                 <span className="summary-label">Average Monthly Income</span>
-                <span className="summary-value">$3,490.00</span>
+                <span className="summary-value">
+                  {loading ? 'Loading...' : formatCurrency(metrics.avgMonthlyIncome)}
+                </span>
               </div>
             </div>
           </div>
