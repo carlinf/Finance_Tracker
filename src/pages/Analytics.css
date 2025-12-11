@@ -485,7 +485,8 @@
   }
 
   .sidebar {
-    width: 280px;
+    width: 100%;
+    max-width: 100vw;
     height: 100vh;
     position: fixed;
     top: 0;
@@ -493,9 +494,11 @@
     transform: translateX(-100%);
     transition: transform 0.3s ease-in-out;
     z-index: 999;
-    border-right: 1px solid #e5e7eb;
+    border-right: none;
     padding: 24px;
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: none;
   }
 
   .sidebar.sidebar-open {

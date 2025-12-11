@@ -92,6 +92,71 @@
   color: white;
 }
 
+/* Hamburger Menu Button */
+.hamburger-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  color: #1f2937;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.hamburger-btn:hover {
+  color: #10b981;
+}
+
+.hamburger-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Menu Overlay */
+.menu-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 998;
+}
+
+/* Sidebar Close Button */
+.sidebar-close-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  color: #6b7280;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.sidebar-close-btn:hover {
+  color: #1f2937;
+}
+
+.sidebar-close-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.sidebar-header-content {
+  flex: 1;
+}
+
 /* Main Content Styles */
 .settings-main {
   flex: 1;
@@ -578,6 +643,71 @@
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
 }
 
+/* Hamburger Menu Button */
+.hamburger-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  color: #1f2937;
+  transition: all 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.hamburger-btn:hover {
+  color: #10b981;
+}
+
+.hamburger-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* Menu Overlay */
+.menu-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 998;
+}
+
+/* Sidebar Close Button */
+.sidebar-close-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px;
+  color: #6b7280;
+  transition: all 0.2s;
+  align-self: flex-start;
+}
+
+.sidebar-close-btn:hover {
+  color: #1f2937;
+}
+
+.sidebar-close-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.sidebar-header-content {
+  flex: 1;
+}
+
 /* Responsive Design */
 @media (max-width: 1024px) {
   .sidebar {
@@ -600,14 +730,44 @@
     flex-direction: column;
   }
 
+  .hamburger-btn {
+    display: block;
+    padding: 10px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .menu-overlay {
+    display: block;
+    z-index: 998;
+  }
+
+  .sidebar-close-btn {
+    display: block;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .sidebar {
     width: 100%;
-    height: auto;
-    position: relative !important;
+    max-width: 100vw;
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease-in-out;
+    z-index: 999;
     border-right: none;
-    border-bottom: 1px solid #e5e7eb;
-    padding: 16px;
-    overflow-y: visible;
+    border-bottom: none;
+    padding: 24px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    box-shadow: none;
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
   }
 
   .sidebar-header {
