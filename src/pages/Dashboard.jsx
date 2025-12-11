@@ -1,33 +1,46 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../contexts/CurrencyContext'
 import { signOutUser } from '../firebase/auth'
-import { subscribeToTransactions, addTransaction, getCategories } from '../firebase/firestore'
+import { subscribeToTransactions, addTransaction, subscribeToCategories } from '../firebase/firestore'
+import { Timestamp } from 'firebase/firestore'
 import './Dashboard.css'
 
 function Dashboard() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
-  const { formatCurrency } = useCurrency()
+  const { formatCurrency, getCurrencySymbol } = useCurrency()
   const [chartData, setChartData] = useState([])
   const [transactions, setTransactions] = useState([])
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false)
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false)
   const [showAddTransactionModal, setShowAddTransactionModal] = useState(false)
-  const [userCategories, setUserCategories] = useState([])
-  const [formData, setFormData] = useState({
+  const [categories, setCategories] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [transactionForm, setTransactionForm] = useState({
     type: 'expense',
     amount: '',
     category: '',
-    date: new Date().toISOString().split('T')[0],
+    date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
     description: '',
     receipt: null
   })
-  const [submitting, setSubmitting] = useState(false)
+  const [formErrors, setFormErrors] = useState({})
+
+  // Subscribe to categories from Firebase
+  useEffect(() => {
+    if (!currentUser) return
+
+    const unsubscribe = subscribeToCategories(currentUser.uid, (fetchedCategories) => {
+      setCategories(fetchedCategories)
+    })
+
+    return () => unsubscribe()
+  }, [currentUser])
 
   // Subscribe to transactions from Firebase
   useEffect(() => {
@@ -88,16 +101,6 @@ function Dashboard() {
     return () => unsubscribe()
   }, [currentUser])
 
-  // Fetch categories
-  useEffect(() => {
-    const fetchCategories = async () => {
-      if (!currentUser) return
-      const { categories: fetchedCategories } = await getCategories(currentUser.uid)
-      setUserCategories(fetchedCategories)
-    }
-    fetchCategories()
-  }, [currentUser])
-
   // Calculate totals from transactions
   const totalBalance = transactions.reduce((sum, t) => sum + (t.amount || 0), 0)
   
@@ -144,30 +147,24 @@ function Dashboard() {
   }
 
   const handleSignOut = () => {
-    setShowProfileDropdown(false)
     setShowSignOutModal(true)
+    setIsProfileDropdownOpen(false)
   }
 
-  const handleProfileClick = () => {
-    setShowProfileDropdown(prev => !prev)
+  const toggleProfileDropdown = () => {
+    setIsProfileDropdownOpen(!isProfileDropdownOpen)
   }
 
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (showProfileDropdown && !event.target.closest('.user-info')) {
-        setShowProfileDropdown(false)
+      if (isProfileDropdownOpen && !event.target.closest('.user-info')) {
+        setIsProfileDropdownOpen(false)
       }
     }
-
-    if (showProfileDropdown) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showProfileDropdown])
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isProfileDropdownOpen])
 
   const confirmSignOut = async () => {
     const { error } = await signOutUser()
@@ -182,146 +179,123 @@ function Dashboard() {
   }
 
   const handleOpenAddTransaction = () => {
-    setFormData({
+    setShowAddTransactionModal(true)
+    setTransactionForm({
       type: 'expense',
       amount: '',
       category: '',
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
       description: '',
       receipt: null
     })
-    setShowAddTransactionModal(true)
+    setFormErrors({})
   }
 
   const handleCloseAddTransaction = () => {
     setShowAddTransactionModal(false)
-    setFormData({
+    setTransactionForm({
       type: 'expense',
       amount: '',
       category: '',
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
       description: '',
       receipt: null
     })
+    setFormErrors({})
   }
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => ({
+    setTransactionForm(prev => ({
       ...prev,
       [name]: value
     }))
+    // Clear error when user starts typing
+    if (formErrors[name]) {
+      setFormErrors(prev => ({
+        ...prev,
+        [name]: ''
+      }))
+    }
   }
 
   const handleFileChange = (e) => {
-    setFormData(prev => ({
-      ...prev,
-      receipt: e.target.files[0] || null
-    }))
+    const file = e.target.files[0]
+    if (file) {
+      setTransactionForm(prev => ({
+        ...prev,
+        receipt: file
+      }))
+    }
   }
 
   const formatDateForInput = (dateString) => {
-    if (!dateString) {
-      const today = new Date()
-      const month = String(today.getMonth() + 1).padStart(2, '0')
-      const day = String(today.getDate()).padStart(2, '0')
-      const year = today.getFullYear()
-      return `${month}/${day}/${year}`
+    // Convert MM/DD/YYYY to YYYY-MM-DD for input
+    const parts = dateString.split('/')
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`
     }
-    
-    // Convert YYYY-MM-DD to MM/DD/YYYY for display
-    if (dateString.includes('-')) {
-      const [year, month, day] = dateString.split('-')
-      return `${month}/${day}/${year}`
-    }
-    
-    // If already in MM/DD/YYYY format, return as-is
     return dateString
   }
 
+  const formatDateFromInput = (dateString) => {
+    // Convert YYYY-MM-DD to MM/DD/YYYY
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+  }
+
   const handleDateChange = (e) => {
-    let value = e.target.value
-    
-    // Remove any non-digit characters except slashes
-    value = value.replace(/[^\d/]/g, '')
-    
-    // Auto-format as user types: MM/DD/YYYY
-    let formatted = value
-    const numbers = value.replace(/\//g, '')
-    
-    if (numbers.length > 2 && numbers.length <= 4) {
-      formatted = numbers.slice(0, 2) + '/' + numbers.slice(2)
-    } else if (numbers.length > 4) {
-      formatted = numbers.slice(0, 2) + '/' + numbers.slice(2, 4) + '/' + numbers.slice(4, 8)
-    }
-    
-    // Convert MM/DD/YYYY to YYYY-MM-DD for storage
-    const parts = formatted.split('/')
-    if (parts.length === 3 && parts[0] && parts[1] && parts[2] && parts[2].length === 4) {
-      const month = parts[0].padStart(2, '0')
-      const day = parts[1].padStart(2, '0')
-      const year = parts[2]
-      
-      // Validate the date
-      const dateObj = new Date(`${year}-${month}-${day}`)
-      if (!isNaN(dateObj.getTime())) {
-        setFormData(prev => ({
-          ...prev,
-          date: `${year}-${month}-${day}`
-        }))
-        return
-      }
-    }
-    
-    // Store display format temporarily if not complete
-    setFormData(prev => ({
+    const inputValue = e.target.value
+    const formattedDate = formatDateFromInput(inputValue)
+    setTransactionForm(prev => ({
       ...prev,
-      date: formatted
+      date: formattedDate
     }))
   }
 
   const handleSubmitTransaction = async (e) => {
     e.preventDefault()
-    
-    if (!formData.amount || !formData.category || !formData.date || !formData.description) {
-      alert('Please fill in all required fields')
-      return
-    }
-
-    if (!currentUser) {
-      alert('You must be logged in to add a transaction')
-      return
-    }
-
     setSubmitting(true)
+    setFormErrors({})
+
+    // Validation
+    const errors = {}
+    if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
+      errors.amount = 'Please enter a valid amount'
+    }
+    if (!transactionForm.category) {
+      errors.category = 'Please select a category'
+    }
+    if (!transactionForm.date) {
+      errors.date = 'Please select a date'
+    }
+    if (!transactionForm.description || transactionForm.description.trim() === '') {
+      errors.description = 'Please enter a description'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors)
+      setSubmitting(false)
+      return
+    }
 
     try {
-      // Convert amount to number, negative for expenses, positive for income
-      const amount = parseFloat(formData.amount)
-      if (isNaN(amount) || amount <= 0) {
-        alert('Please enter a valid amount')
-        setSubmitting(false)
-        return
-      }
-      const transactionAmount = formData.type === 'expense' ? -Math.abs(amount) : Math.abs(amount)
-
-      // Ensure date is in YYYY-MM-DD format
-      let dateToStore = formData.date
-      if (dateToStore.includes('/')) {
-        const parts = dateToStore.split('/')
-        if (parts.length === 3) {
-          const [month, day, year] = parts
-          dateToStore = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-        }
-      }
+      // Parse date and convert to Firestore Timestamp
+      const dateParts = transactionForm.date.split('/')
+      const transactionDate = new Date(parseInt(dateParts[2]), parseInt(dateParts[0]) - 1, parseInt(dateParts[1]))
+      
+      // Calculate amount: negative for expenses, positive for income
+      const amount = transactionForm.type === 'expense' 
+        ? -Math.abs(parseFloat(transactionForm.amount))
+        : Math.abs(parseFloat(transactionForm.amount))
 
       const transactionData = {
-        name: formData.description,
-        description: formData.description,
-        amount: transactionAmount,
-        category: formData.category,
-        date: dateToStore,
-        type: formData.type
+        name: transactionForm.description,
+        description: transactionForm.description,
+        amount: amount,
+        category: transactionForm.category,
+        type: transactionForm.type,
+        date: Timestamp.fromDate(transactionDate)
       }
 
       const { error } = await addTransaction(currentUser.uid, transactionData)
@@ -338,44 +312,10 @@ function Dashboard() {
     }
   }
 
-  // Default categories if none exist
-  const defaultCategories = useMemo(() => {
-    if (formData.type === 'income') {
-      return [
-        { id: 'default-salary', name: 'Salary', type: 'income' },
-        { id: 'default-freelance', name: 'Freelance', type: 'income' },
-        { id: 'default-investment', name: 'Investment', type: 'income' },
-        { id: 'default-bonus', name: 'Bonus', type: 'income' },
-        { id: 'default-other', name: 'Other Income', type: 'income' }
-      ]
-    } else {
-      return [
-        { id: 'default-food', name: 'Food', type: 'expense' },
-        { id: 'default-transportation', name: 'Transportation', type: 'expense' },
-        { id: 'default-entertainment', name: 'Entertainment', type: 'expense' },
-        { id: 'default-utilities', name: 'Utilities', type: 'expense' },
-        { id: 'default-shopping', name: 'Shopping', type: 'expense' },
-        { id: 'default-healthcare', name: 'Healthcare', type: 'expense' },
-        { id: 'default-other', name: 'Other Expense', type: 'expense' }
-      ]
-    }
-  }, [formData.type])
-
-  // Filter categories by type, or use defaults if none exist
-  const filteredCategories = useMemo(() => {
-    if (userCategories.length === 0) {
-      return defaultCategories
-    }
-    
-    return userCategories.filter(cat => {
-      // If category has a type field, filter by it
-      if (cat.type) {
-        return cat.type === formData.type
-      }
-      // Otherwise, show all categories
-      return true
-    })
-  }, [userCategories, formData.type, defaultCategories])
+  // Filter categories by type
+  const filteredCategories = categories.filter(cat => 
+    cat.type === transactionForm.type || !cat.type
+  )
 
   return (
     <div className="dashboard-container">
@@ -460,7 +400,7 @@ function Dashboard() {
             </svg>
           </button>
           <h1 className="page-title">Dashboard</h1>
-          <div className="user-info" onClick={handleProfileClick}>
+          <div className="user-info" onClick={toggleProfileDropdown}>
             <div className="user-details">
               <span className="user-name">{currentUser?.displayName || 'User'}</span>
               <span className="user-email">{currentUser?.email || ''}</span>
@@ -471,7 +411,7 @@ function Dashboard() {
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
-            {showProfileDropdown && (
+            {isProfileDropdownOpen && (
               <div className="profile-dropdown">
                 <button className="profile-dropdown-item" onClick={handleSignOut}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -479,7 +419,7 @@ function Dashboard() {
                     <polyline points="16 17 21 12 16 7"></polyline>
                     <line x1="21" y1="12" x2="9" y2="12"></line>
                   </svg>
-                  <span>Logout</span>
+                  Logout
                 </button>
               </div>
             )}
@@ -491,9 +431,9 @@ function Dashboard() {
             <div className="summary-card">
               <div className="card-header">
                 <span className="card-title">Total Balance</span>
-                <span className="card-icon">{formatCurrency(0).symbol}</span>
+                <span className="card-icon">{getCurrencySymbol()}</span>
               </div>
-              <div className="card-amount">{formatCurrency(totalBalance).formattedWithSymbol}</div>
+              <div className="card-amount">{formatCurrency(totalBalance)}</div>
             </div>
 
             <div className="summary-card">
@@ -504,7 +444,7 @@ function Dashboard() {
                   <polyline points="17 6 23 6 23 12"></polyline>
                 </svg>
               </div>
-              <div className="card-amount income">+{formatCurrency(monthlyIncome).formattedWithSymbol}</div>
+              <div className="card-amount income">+{formatCurrency(monthlyIncome)}</div>
             </div>
 
             <div className="summary-card">
@@ -515,7 +455,7 @@ function Dashboard() {
                   <polyline points="17 18 23 18 23 12"></polyline>
                 </svg>
               </div>
-              <div className="card-amount expense">-{formatCurrency(monthlyExpense).formattedWithSymbol}</div>
+              <div className="card-amount expense">-{formatCurrency(monthlyExpense)}</div>
             </div>
           </div>
 
@@ -543,7 +483,6 @@ function Dashboard() {
                       borderRadius: '8px',
                       boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
                     }}
-                    formatter={(value) => formatCurrency(value).formattedWithSymbol}
                   />
                   <Line 
                     type="monotone" 
@@ -590,7 +529,7 @@ function Dashboard() {
                       <div className="transaction-category">{transaction.category || 'Uncategorized'}</div>
                     </div>
                     <div className={`transaction-amount ${(transaction.amount || 0) > 0 ? 'income' : 'expense'}`}>
-                      {(transaction.amount || 0) > 0 ? '+' : ''}{formatCurrency(Math.abs(transaction.amount || 0)).formattedWithSymbol}
+                      {(transaction.amount || 0) > 0 ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount || 0))}
                     </div>
                     <div className="transaction-date">{formatDate(transaction.createdAt)}</div>
                   </div>
@@ -605,9 +544,9 @@ function Dashboard() {
       {showSignOutModal && (
         <div className="modal-overlay" onClick={cancelSignOut}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2 className="modal-title">Log Out</h2>
+            <h2 className="modal-title">Sign Out?</h2>
             <p className="modal-message">
-              Are you sure you want to log out?
+              Are you sure you want to sign out? You'll need to sign in again to access your account.
             </p>
             <div className="modal-actions">
               <button className="modal-btn modal-btn-cancel" onClick={cancelSignOut}>
@@ -628,7 +567,7 @@ function Dashboard() {
             <div className="add-transaction-header">
               <div>
                 <h2 className="add-transaction-title">Add Transaction</h2>
-                <p className="add-transaction-subtitle">Record a new income or expense transaction</p>
+                <p className="add-transaction-subtitle">Record a new income or expense transaction.</p>
               </div>
               <button className="modal-close-btn" onClick={handleCloseAddTransaction}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -640,21 +579,30 @@ function Dashboard() {
 
             <form onSubmit={handleSubmitTransaction} className="add-transaction-form">
               {/* Transaction Type Toggle */}
-              <div className="transaction-type-toggle">
-                <button
-                  type="button"
-                  className={`type-toggle-btn ${formData.type === 'expense' ? 'active' : ''}`}
-                  onClick={() => setFormData(prev => ({ ...prev, type: 'expense', category: '' }))}
-                >
-                  Expense
-                </button>
-                <button
-                  type="button"
-                  className={`type-toggle-btn ${formData.type === 'income' ? 'active' : ''}`}
-                  onClick={() => setFormData(prev => ({ ...prev, type: 'income', category: '' }))}
-                >
-                  Income
-                </button>
+              <div className="form-field">
+                <label className="form-label">Transaction Type</label>
+                <div className="type-toggle">
+                  <button
+                    type="button"
+                    className={`type-toggle-btn ${transactionForm.type === 'expense' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTransactionForm(prev => ({ ...prev, type: 'expense', category: '' }))
+                      setFormErrors(prev => ({ ...prev, category: '' }))
+                    }}
+                  >
+                    Expense
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-toggle-btn ${transactionForm.type === 'income' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTransactionForm(prev => ({ ...prev, type: 'income', category: '' }))
+                      setFormErrors(prev => ({ ...prev, category: '' }))
+                    }}
+                  >
+                    Income
+                  </button>
+                </div>
               </div>
 
               {/* Amount Field */}
@@ -662,20 +610,18 @@ function Dashboard() {
                 <label className="form-label">
                   Amount <span className="required">*</span>
                 </label>
-                <div className="amount-input-wrapper">
-                  <span className="amount-prefix">{formatCurrency(0).symbol}</span>
-                  <input
-                    type="number"
-                    name="amount"
-                    className="form-input amount-input"
-                    placeholder=" 0.00"
-                    value={formData.amount}
-                    onChange={handleInputChange}
-                    step="0.01"
-                    min="0"
-                    required
-                  />
-                </div>
+                <input
+                  type="number"
+                  name="amount"
+                  className={`form-input ${formErrors.amount ? 'error' : ''}`}
+                  placeholder="$0.00"
+                  value={transactionForm.amount}
+                  onChange={handleInputChange}
+                  step="0.01"
+                  min="0.01"
+                  required
+                />
+                {formErrors.amount && <span className="error-message">{formErrors.amount}</span>}
               </div>
 
               {/* Category Field */}
@@ -686,8 +632,8 @@ function Dashboard() {
                 <div className="select-wrapper">
                   <select
                     name="category"
-                    className="form-select"
-                    value={formData.category}
+                    className={`form-select ${formErrors.category ? 'error' : ''}`}
+                    value={transactionForm.category}
                     onChange={handleInputChange}
                     required
                   >
@@ -702,6 +648,7 @@ function Dashboard() {
                     <polyline points="6 9 12 15 18 9"></polyline>
                   </svg>
                 </div>
+                {formErrors.category && <span className="error-message">{formErrors.category}</span>}
               </div>
 
               {/* Date Field */}
@@ -711,21 +658,21 @@ function Dashboard() {
                 </label>
                 <div className="date-input-wrapper">
                   <input
-                    type="text"
+                    type="date"
                     name="date"
-                    className="form-input date-input"
-                    placeholder="MM/DD/YYYY"
-                    value={formatDateForInput(formData.date)}
+                    className={`form-input ${formErrors.date ? 'error' : ''}`}
+                    value={formatDateForInput(transactionForm.date)}
                     onChange={handleDateChange}
                     required
                   />
-                  <svg className="date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg className="date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                     <line x1="16" y1="2" x2="16" y2="6"></line>
                     <line x1="8" y1="2" x2="8" y2="6"></line>
                     <line x1="3" y1="10" x2="21" y2="10"></line>
                   </svg>
                 </div>
+                {formErrors.date && <span className="error-message">{formErrors.date}</span>}
               </div>
 
               {/* Description Field */}
@@ -735,13 +682,14 @@ function Dashboard() {
                 </label>
                 <textarea
                   name="description"
-                  className="form-textarea"
+                  className={`form-textarea ${formErrors.description ? 'error' : ''}`}
                   placeholder="e.g., Grocery shopping, Monthly rent..."
-                  value={formData.description}
+                  value={transactionForm.description}
                   onChange={handleInputChange}
-                  rows="3"
+                  rows="4"
                   required
                 />
+                {formErrors.description && <span className="error-message">{formErrors.description}</span>}
               </div>
 
               {/* Receipt Upload Field */}
@@ -751,19 +699,41 @@ function Dashboard() {
                   <input
                     type="file"
                     id="receipt-upload"
-                    className="file-input"
                     accept="image/*"
                     onChange={handleFileChange}
+                    style={{ display: 'none' }}
                   />
                   <label htmlFor="receipt-upload" className="file-upload-label">
-                    <svg className="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
-                      <polyline points="17 8 12 3 7 8"></polyline>
-                      <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    <span>Click to upload receipt image</span>
-                    {formData.receipt && (
-                      <span className="file-name">{formData.receipt.name}</span>
+                    {transactionForm.receipt ? (
+                      <div className="file-uploaded">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                          <line x1="16" y1="13" x2="8" y2="13"></line>
+                          <line x1="16" y1="17" x2="8" y2="17"></line>
+                          <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                        <span>{transactionForm.receipt.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setTransactionForm(prev => ({ ...prev, receipt: null }))
+                          }}
+                          className="remove-file-btn"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                          <polyline points="17 8 12 3 7 8"></polyline>
+                          <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <span>Click to upload receipt image</span>
+                      </>
                     )}
                   </label>
                 </div>

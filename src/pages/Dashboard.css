@@ -994,6 +994,7 @@
 }
 
 /* Transaction Type Toggle */
+.type-toggle,
 .transaction-type-toggle {
   display: flex;
   gap: 8px;
@@ -1063,6 +1064,24 @@
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
 }
 
+.form-input.error,
+.form-select.error,
+.form-textarea.error {
+  border-color: #ef4444;
+}
+
+.form-input.error:focus,
+.form-select.error:focus,
+.form-textarea.error:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.error-message {
+  font-size: 12px;
+  color: #ef4444;
+  margin-top: -4px;
+}
+
 .form-textarea {
   resize: vertical;
   min-height: 80px;
@@ -1127,6 +1146,22 @@
   position: relative;
 }
 
+.date-input-wrapper input[type="date"] {
+  padding-right: 40px;
+}
+
+/* Hide browser's default date picker icon */
+.date-input-wrapper input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+}
+
+.date-input-wrapper input[type="date"]::-webkit-inner-spin-button,
+.date-input-wrapper input[type="date"]::-webkit-clear-button {
+  display: none;
+  -webkit-appearance: none;
+}
+
 .date-icon {
   position: absolute;
   right: 12px;
@@ -1185,6 +1220,59 @@
   font-size: 12px;
   color: #10b981;
   margin-top: 4px;
+}
+
+.file-upload-label svg {
+  width: 32px;
+  height: 32px;
+  color: #9ca3af;
+  margin-bottom: 8px;
+}
+
+.file-uploaded {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  background: #f0fdf4;
+  border-radius: 6px;
+  border: 1px solid #10b981;
+}
+
+.file-uploaded svg {
+  width: 20px;
+  height: 20px;
+  color: #10b981;
+  margin: 0;
+}
+
+.file-uploaded span {
+  flex: 1;
+  font-size: 14px;
+  color: #1f2937;
+  text-align: left;
+}
+
+.remove-file-btn {
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.2s;
+}
+
+.remove-file-btn:hover {
+  color: #dc2626;
+  transform: scale(1.1);
 }
 
 /* Form Actions */

@@ -3,7 +3,8 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useCurrency } from '../contexts/CurrencyContext'
 import { signOutUser } from '../firebase/auth'
-import { subscribeToTransactions, deleteTransaction, addTransaction, getCategories } from '../firebase/firestore'
+import { subscribeToTransactions, deleteTransaction, addTransaction, subscribeToCategories, updateTransaction } from '../firebase/firestore'
+import { Timestamp } from 'firebase/firestore'
 import './Transactions.css'
 
 function Transactions() {
@@ -15,45 +16,49 @@ function Transactions() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false)
+  const [showAddTransactionModal, setShowAddTransactionModal] = useState(false)
+  const [showEditTransactionModal, setShowEditTransactionModal] = useState(false)
+  const [showDeleteTransactionModal, setShowDeleteTransactionModal] = useState(false)
+  const [editingTransactionId, setEditingTransactionId] = useState(null)
+  const [deletingTransactionId, setDeletingTransactionId] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const [categories, setCategories] = useState([])
   const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showAddTransactionModal, setShowAddTransactionModal] = useState(false)
-  const [userCategories, setUserCategories] = useState([])
-  const [formData, setFormData] = useState({
+  const [submitting, setSubmitting] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [transactionForm, setTransactionForm] = useState({
     type: 'expense',
     amount: '',
     category: '',
-    date: new Date().toISOString().split('T')[0],
+    date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
     description: '',
     receipt: null
   })
-  const [submitting, setSubmitting] = useState(false)
+  const [formErrors, setFormErrors] = useState({})
 
-  // Subscribe to transactions from Firebase
+  // Subscribe to categories from Firebase
   useEffect(() => {
-    if (!currentUser) {
-      setLoading(false)
-      return
-    }
+    if (!currentUser) return
 
-    console.log('Subscribing to transactions for user:', currentUser.uid)
-    const unsubscribe = subscribeToTransactions(currentUser.uid, (fetchedTransactions) => {
-      console.log('Received transactions:', fetchedTransactions.length, fetchedTransactions)
-      setTransactions(fetchedTransactions)
-      setLoading(false)
+    const unsubscribe = subscribeToCategories(currentUser.uid, (fetchedCategories) => {
+      setCategories(fetchedCategories)
     })
 
     return () => unsubscribe()
   }, [currentUser])
 
-  // Fetch categories
+  // Subscribe to transactions from Firebase
   useEffect(() => {
-    const fetchCategories = async () => {
-      if (!currentUser) return
-      const { categories: fetchedCategories } = await getCategories(currentUser.uid)
-      setUserCategories(fetchedCategories)
-    }
-    fetchCategories()
+    if (!currentUser) return
+
+    const unsubscribe = subscribeToTransactions(currentUser.uid, (fetchedTransactions) => {
+      setTransactions(fetchedTransactions)
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
   }, [currentUser])
 
   // Filter transactions based on search and filters
@@ -89,9 +94,9 @@ function Transactions() {
   const expenseCount = filteredTransactions.filter(t => (t.amount || 0) < 0).length
 
   // Get unique categories for filter dropdown
-  const categories = useMemo(() => {
-    const uniqueCategories = [...new Set(transactions.map(t => t.category).filter(Boolean))]
-    return uniqueCategories.sort()
+  const uniqueCategories = useMemo(() => {
+    const unique = [...new Set(transactions.map(t => t.category).filter(Boolean))]
+    return unique.sort()
   }, [transactions])
 
   // Format transaction date
@@ -101,9 +106,104 @@ function Transactions() {
     return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
   }
 
+  // Format date for CSV export
+  const formatDateForCSV = (timestamp) => {
+    if (!timestamp) return ''
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+  }
+
+  // Export transactions to CSV/Excel
+  const handleExportToCSV = () => {
+    // Use filtered transactions or all transactions
+    const transactionsToExport = filteredTransactions.length > 0 ? filteredTransactions : transactions
+
+    if (transactionsToExport.length === 0) {
+      alert('No transactions to export')
+      return
+    }
+
+    // CSV Headers
+    const headers = ['Date', 'Description', 'Category', 'Type', 'Amount', 'Balance']
+    
+    // Calculate running balance
+    let balance = 0
+    const rows = transactionsToExport
+      .sort((a, b) => {
+        const dateA = a.createdAt?.toDate() || new Date(0)
+        const dateB = b.createdAt?.toDate() || new Date(0)
+        return dateA - dateB
+      })
+      .map(transaction => {
+        balance += transaction.amount || 0
+        const isIncome = (transaction.amount || 0) > 0
+        const type = isIncome ? 'Income' : 'Expense'
+        const amount = Math.abs(transaction.amount || 0)
+        
+        return [
+          formatDateForCSV(transaction.createdAt || transaction.date),
+          transaction.name || transaction.description || 'Unnamed Transaction',
+          transaction.category || 'Uncategorized',
+          type,
+          amount.toFixed(2),
+          balance.toFixed(2)
+        ]
+      })
+
+    // Create CSV content
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => {
+        // Escape commas and quotes in cell values
+        const cellValue = String(cell || '')
+        if (cellValue.includes(',') || cellValue.includes('"') || cellValue.includes('\n')) {
+          return `"${cellValue.replace(/"/g, '""')}"`
+        }
+        return cellValue
+      }).join(','))
+    ].join('\n')
+
+    // Add BOM for Excel UTF-8 support
+    const BOM = '\uFEFF'
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' })
+    
+    // Create download link
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    
+    // Generate filename with current date
+    const today = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+    link.setAttribute('download', `transactions_${today}.csv`)
+    
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    // Clean up
+    URL.revokeObjectURL(url)
+  }
+
   const handleSignOut = () => {
     setShowSignOutModal(true)
+    setIsProfileDropdownOpen(false)
   }
+
+  const toggleProfileDropdown = () => {
+    setIsProfileDropdownOpen(!isProfileDropdownOpen)
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isProfileDropdownOpen && !event.target.closest('.user-info')) {
+        setIsProfileDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isProfileDropdownOpen])
 
   const confirmSignOut = async () => {
     const { error } = await signOutUser()
@@ -113,12 +213,138 @@ function Transactions() {
     }
   }
 
-  const handleDeleteTransaction = async (transactionId) => {
-    if (window.confirm('Are you sure you want to delete this transaction?')) {
-      const { error } = await deleteTransaction(transactionId)
+  const handleDeleteTransaction = (transactionId) => {
+    setDeletingTransactionId(transactionId)
+    setShowDeleteTransactionModal(true)
+  }
+
+  const confirmDeleteTransaction = async () => {
+    if (!deletingTransactionId) return
+
+    setDeleting(true)
+
+    try {
+      const { error } = await deleteTransaction(deletingTransactionId)
       if (error) {
         alert('Failed to delete transaction: ' + error)
+        setDeleting(false)
+      } else {
+        // Successfully deleted from Firebase
+        setShowDeleteTransactionModal(false)
+        setDeletingTransactionId(null)
+        setDeleting(false)
+        // Transaction will be automatically removed from the list via the subscription
       }
+    } catch (error) {
+      console.error('Error deleting transaction:', error)
+      alert('Failed to delete transaction: ' + error.message)
+      setDeleting(false)
+    }
+  }
+
+  const cancelDeleteTransaction = () => {
+    setShowDeleteTransactionModal(false)
+    setDeletingTransactionId(null)
+  }
+
+  const handleEditTransaction = (transaction) => {
+    // Determine type from amount
+    const isIncome = (transaction.amount || 0) > 0
+    const type = isIncome ? 'income' : 'expense'
+    
+    // Format date
+    let formattedDate = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+    if (transaction.createdAt) {
+      const date = transaction.createdAt.toDate ? transaction.createdAt.toDate() : new Date(transaction.createdAt)
+      formattedDate = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+    } else if (transaction.date) {
+      const date = transaction.date.toDate ? transaction.date.toDate() : new Date(transaction.date)
+      formattedDate = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+    }
+
+    setEditingTransactionId(transaction.id)
+    setTransactionForm({
+      type: type,
+      amount: Math.abs(transaction.amount || 0).toString(),
+      category: transaction.category || '',
+      date: formattedDate,
+      description: transaction.name || transaction.description || '',
+      receipt: null
+    })
+    setFormErrors({})
+    setShowEditTransactionModal(true)
+  }
+
+  const handleCloseEditTransaction = () => {
+    setShowEditTransactionModal(false)
+    setEditingTransactionId(null)
+    setTransactionForm({
+      type: 'expense',
+      amount: '',
+      category: '',
+      date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+      description: '',
+      receipt: null
+    })
+    setFormErrors({})
+  }
+
+  const handleUpdateTransaction = async (e) => {
+    e.preventDefault()
+    setUpdating(true)
+    setFormErrors({})
+
+    // Validation
+    const errors = {}
+    if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
+      errors.amount = 'Please enter a valid amount'
+    }
+    if (!transactionForm.category) {
+      errors.category = 'Please select a category'
+    }
+    if (!transactionForm.date) {
+      errors.date = 'Please select a date'
+    }
+    if (!transactionForm.description || transactionForm.description.trim() === '') {
+      errors.description = 'Please enter a description'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors)
+      setUpdating(false)
+      return
+    }
+
+    try {
+      // Parse date and convert to Firestore Timestamp
+      const dateParts = transactionForm.date.split('/')
+      const transactionDate = new Date(parseInt(dateParts[2]), parseInt(dateParts[0]) - 1, parseInt(dateParts[1]))
+      
+      // Calculate amount: negative for expenses, positive for income
+      const amount = transactionForm.type === 'expense' 
+        ? -Math.abs(parseFloat(transactionForm.amount))
+        : Math.abs(parseFloat(transactionForm.amount))
+
+      const transactionData = {
+        name: transactionForm.description,
+        description: transactionForm.description,
+        amount: amount,
+        category: transactionForm.category,
+        type: transactionForm.type,
+        date: Timestamp.fromDate(transactionDate)
+      }
+
+      const { error } = await updateTransaction(editingTransactionId, transactionData)
+      
+      if (error) {
+        alert('Failed to update transaction: ' + error)
+      } else {
+        handleCloseEditTransaction()
+      }
+    } catch (error) {
+      alert('Failed to update transaction: ' + error.message)
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -132,201 +358,124 @@ function Transactions() {
     setCategoryFilter('all')
   }
 
-  const handleExportCSV = () => {
-    // Use filtered transactions or all transactions
-    const dataToExport = filteredTransactions.length > 0 ? filteredTransactions : transactions
-    
-    if (dataToExport.length === 0) {
-      alert('No transactions to export.')
-      return
-    }
-
-    // CSV headers
-    const headers = ['Date', 'Description', 'Category', 'Type', 'Amount']
-    
-    // Convert transactions to CSV rows
-    const rows = dataToExport.map(transaction => {
-      const date = formatDate(transaction.createdAt)
-      const description = (transaction.name || transaction.description || 'N/A').replace(/"/g, '""') // Escape quotes
-      const category = (transaction.category || 'Uncategorized').replace(/"/g, '""')
-      const type = (transaction.amount || 0) > 0 ? 'Income' : 'Expense'
-      const amount = Math.abs(transaction.amount || 0).toFixed(2)
-      
-      // Wrap fields in quotes if they contain commas
-      return [
-        `"${date}"`,
-        `"${description}"`,
-        `"${category}"`,
-        `"${type}"`,
-        `"${amount}"`
-      ].join(',')
-    })
-    
-    // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows
-    ].join('\n')
-    
-    // Create blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    
-    // Generate filename with current date
-    const today = new Date()
-    const dateStr = today.toISOString().split('T')[0]
-    const filename = `transactions_${dateStr}.csv`
-    
-    link.setAttribute('href', url)
-    link.setAttribute('download', filename)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
-
   const handleOpenAddTransaction = () => {
-    setFormData({
+    setShowAddTransactionModal(true)
+    setTransactionForm({
       type: 'expense',
       amount: '',
       category: '',
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
       description: '',
       receipt: null
     })
-    setShowAddTransactionModal(true)
+    setFormErrors({})
   }
 
   const handleCloseAddTransaction = () => {
     setShowAddTransactionModal(false)
-    setFormData({
+    setTransactionForm({
       type: 'expense',
       amount: '',
       category: '',
-      date: new Date().toISOString().split('T')[0],
+      date: new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
       description: '',
       receipt: null
     })
+    setFormErrors({})
   }
 
   const handleInputChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => ({
+    setTransactionForm(prev => ({
       ...prev,
       [name]: value
     }))
+    // Clear error when user starts typing
+    if (formErrors[name]) {
+      setFormErrors(prev => ({
+        ...prev,
+        [name]: ''
+      }))
+    }
   }
 
   const handleFileChange = (e) => {
-    setFormData(prev => ({
-      ...prev,
-      receipt: e.target.files[0] || null
-    }))
+    const file = e.target.files[0]
+    if (file) {
+      setTransactionForm(prev => ({
+        ...prev,
+        receipt: file
+      }))
+    }
   }
 
   const formatDateForInput = (dateString) => {
-    if (!dateString) {
-      const today = new Date()
-      const month = String(today.getMonth() + 1).padStart(2, '0')
-      const day = String(today.getDate()).padStart(2, '0')
-      const year = today.getFullYear()
-      return `${month}/${day}/${year}`
+    // Convert MM/DD/YYYY to YYYY-MM-DD for input
+    const parts = dateString.split('/')
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`
     }
-    
-    // Convert YYYY-MM-DD to MM/DD/YYYY for display
-    if (dateString.includes('-')) {
-      const [year, month, day] = dateString.split('-')
-      return `${month}/${day}/${year}`
-    }
-    
-    // If already in MM/DD/YYYY format, return as-is
     return dateString
   }
 
+  const formatDateFromInput = (dateString) => {
+    // Convert YYYY-MM-DD to MM/DD/YYYY
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+  }
+
   const handleDateChange = (e) => {
-    let value = e.target.value
-    
-    // Remove any non-digit characters except slashes
-    value = value.replace(/[^\d/]/g, '')
-    
-    // Auto-format as user types: MM/DD/YYYY
-    let formatted = value
-    const numbers = value.replace(/\//g, '')
-    
-    if (numbers.length > 2 && numbers.length <= 4) {
-      formatted = numbers.slice(0, 2) + '/' + numbers.slice(2)
-    } else if (numbers.length > 4) {
-      formatted = numbers.slice(0, 2) + '/' + numbers.slice(2, 4) + '/' + numbers.slice(4, 8)
-    }
-    
-    // Convert MM/DD/YYYY to YYYY-MM-DD for storage
-    const parts = formatted.split('/')
-    if (parts.length === 3 && parts[0] && parts[1] && parts[2] && parts[2].length === 4) {
-      const month = parts[0].padStart(2, '0')
-      const day = parts[1].padStart(2, '0')
-      const year = parts[2]
-      
-      // Validate the date
-      const dateObj = new Date(`${year}-${month}-${day}`)
-      if (!isNaN(dateObj.getTime())) {
-        setFormData(prev => ({
-          ...prev,
-          date: `${year}-${month}-${day}`
-        }))
-        return
-      }
-    }
-    
-    // Store display format temporarily if not complete
-    setFormData(prev => ({
+    const inputValue = e.target.value
+    const formattedDate = formatDateFromInput(inputValue)
+    setTransactionForm(prev => ({
       ...prev,
-      date: formatted
+      date: formattedDate
     }))
   }
 
   const handleSubmitTransaction = async (e) => {
     e.preventDefault()
-    
-    if (!formData.amount || !formData.category || !formData.date || !formData.description) {
-      alert('Please fill in all required fields')
-      return
-    }
-
-    if (!currentUser) {
-      alert('You must be logged in to add a transaction')
-      return
-    }
-
     setSubmitting(true)
+    setFormErrors({})
+
+    // Validation
+    const errors = {}
+    if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
+      errors.amount = 'Please enter a valid amount'
+    }
+    if (!transactionForm.category) {
+      errors.category = 'Please select a category'
+    }
+    if (!transactionForm.date) {
+      errors.date = 'Please select a date'
+    }
+    if (!transactionForm.description || transactionForm.description.trim() === '') {
+      errors.description = 'Please enter a description'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors)
+      setSubmitting(false)
+      return
+    }
 
     try {
-      // Convert amount to number, negative for expenses, positive for income
-      const amount = parseFloat(formData.amount)
-      if (isNaN(amount) || amount <= 0) {
-        alert('Please enter a valid amount')
-        setSubmitting(false)
-        return
-      }
-      const transactionAmount = formData.type === 'expense' ? -Math.abs(amount) : Math.abs(amount)
-
-      // Ensure date is in YYYY-MM-DD format
-      let dateToStore = formData.date
-      if (dateToStore.includes('/')) {
-        const parts = dateToStore.split('/')
-        if (parts.length === 3) {
-          const [month, day, year] = parts
-          dateToStore = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
-        }
-      }
+      // Parse date and convert to Firestore Timestamp
+      const dateParts = transactionForm.date.split('/')
+      const transactionDate = new Date(parseInt(dateParts[2]), parseInt(dateParts[0]) - 1, parseInt(dateParts[1]))
+      
+      // Calculate amount: negative for expenses, positive for income
+      const amount = transactionForm.type === 'expense' 
+        ? -Math.abs(parseFloat(transactionForm.amount))
+        : Math.abs(parseFloat(transactionForm.amount))
 
       const transactionData = {
-        name: formData.description,
-        description: formData.description,
-        amount: transactionAmount,
-        category: formData.category,
-        date: dateToStore,
-        type: formData.type
+        name: transactionForm.description,
+        description: transactionForm.description,
+        amount: amount,
+        category: transactionForm.category,
+        type: transactionForm.type,
+        date: Timestamp.fromDate(transactionDate)
       }
 
       const { error } = await addTransaction(currentUser.uid, transactionData)
@@ -343,44 +492,10 @@ function Transactions() {
     }
   }
 
-  // Default categories if none exist
-  const defaultCategories = useMemo(() => {
-    if (formData.type === 'income') {
-      return [
-        { id: 'default-salary', name: 'Salary', type: 'income' },
-        { id: 'default-freelance', name: 'Freelance', type: 'income' },
-        { id: 'default-investment', name: 'Investment', type: 'income' },
-        { id: 'default-bonus', name: 'Bonus', type: 'income' },
-        { id: 'default-other', name: 'Other Income', type: 'income' }
-      ]
-    } else {
-      return [
-        { id: 'default-food', name: 'Food', type: 'expense' },
-        { id: 'default-transportation', name: 'Transportation', type: 'expense' },
-        { id: 'default-entertainment', name: 'Entertainment', type: 'expense' },
-        { id: 'default-utilities', name: 'Utilities', type: 'expense' },
-        { id: 'default-shopping', name: 'Shopping', type: 'expense' },
-        { id: 'default-healthcare', name: 'Healthcare', type: 'expense' },
-        { id: 'default-other', name: 'Other Expense', type: 'expense' }
-      ]
-    }
-  }, [formData.type])
-
-  // Filter categories by type, or use defaults if none exist
-  const filteredCategories = useMemo(() => {
-    if (userCategories.length === 0) {
-      return defaultCategories
-    }
-    
-    return userCategories.filter(cat => {
-      // If category has a type field, filter by it
-      if (cat.type) {
-        return cat.type === formData.type
-      }
-      // Otherwise, show all categories
-      return true
-    })
-  }, [userCategories, formData.type, defaultCategories])
+  // Filter categories by type
+  const filteredCategories = categories.filter(cat => 
+    cat.type === transactionForm.type || !cat.type
+  )
 
   return (
     <div className="dashboard-container">
@@ -465,7 +580,7 @@ function Transactions() {
             </svg>
           </button>
           <h1 className="page-title">Transactions</h1>
-          <div className="user-info">
+          <div className="user-info" onClick={toggleProfileDropdown}>
             <div className="user-details">
               <span className="user-name">{currentUser?.displayName || 'User'}</span>
               <span className="user-email">{currentUser?.email || ''}</span>
@@ -476,6 +591,18 @@ function Transactions() {
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
+            {isProfileDropdownOpen && (
+              <div className="profile-dropdown">
+                <button className="profile-dropdown-item" onClick={handleSignOut}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                  </svg>
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -484,7 +611,7 @@ function Transactions() {
             <p className="page-subtitle">View and manage all your financial transactions</p>
           </div>
           <div className="header-actions">
-            <button className="btn-export" onClick={handleExportCSV}>
+            <button className="btn-export" onClick={handleExportToCSV}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
                 <polyline points="7 10 12 15 17 10"></polyline>
@@ -509,7 +636,7 @@ function Transactions() {
                 <span className="card-title">Total Income</span>
                 <span className="card-badge income-badge">+{incomeCount}</span>
               </div>
-              <div className="card-amount income">{formatCurrency(totalIncome).formattedWithSymbol}</div>
+              <div className="card-amount income">{formatCurrency(totalIncome)}</div>
             </div>
 
             <div className="summary-card expense-card">
@@ -517,7 +644,7 @@ function Transactions() {
                 <span className="card-title">Total Expense</span>
                 <span className="card-badge expense-badge">{expenseCount}</span>
               </div>
-              <div className="card-amount expense">{formatCurrency(totalExpense).formattedWithSymbol}</div>
+              <div className="card-amount expense">{formatCurrency(totalExpense)}</div>
             </div>
 
             <div className="summary-card balance-card">
@@ -526,7 +653,7 @@ function Transactions() {
                 <span className="card-badge neutral-badge">{transactions.length} total</span>
               </div>
               <div className={`card-amount ${netBalance >= 0 ? 'income' : 'expense'}`}>
-                {formatCurrency(Math.abs(netBalance)).formattedWithSymbol}
+                {formatCurrency(netBalance)}
               </div>
             </div>
           </div>
@@ -567,7 +694,7 @@ function Transactions() {
                 onChange={(e) => setCategoryFilter(e.target.value)}
               >
                 <option value="all">All Categories</option>
-                {categories.map(category => (
+                {uniqueCategories.map(category => (
                   <option key={category} value={category}>{category}</option>
                 ))}
               </select>
@@ -602,14 +729,18 @@ function Transactions() {
                     </div>
                     <div className="transaction-amount-wrapper">
                       <div className={`transaction-amount ${isIncome ? 'income' : 'expense'}`}>
-                        {isIncome ? '+' : ''}{formatCurrency(Math.abs(transaction.amount || 0)).formattedWithSymbol}
+                        {isIncome ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount || 0))}
                       </div>
                       <span className={`transaction-badge ${isIncome ? 'income' : 'expense'}`}>
                         {isIncome ? 'income' : 'expense'}
                       </span>
                     </div>
                     <div className="transaction-actions">
-                      <button className="action-btn edit-btn" title="Edit transaction">
+                      <button 
+                        className="action-btn edit-btn" 
+                        onClick={() => handleEditTransaction(transaction)}
+                        title="Edit transaction"
+                      >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
                           <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
@@ -619,11 +750,19 @@ function Transactions() {
                         className="action-btn delete-btn" 
                         onClick={() => handleDeleteTransaction(transaction.id)}
                         title="Delete transaction"
+                        disabled={deleting && deletingTransactionId === transaction.id}
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
-                        </svg>
+                        {deleting && deletingTransactionId === transaction.id ? (
+                          <svg className="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
+                            <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"></path>
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -661,7 +800,7 @@ function Transactions() {
             <div className="add-transaction-header">
               <div>
                 <h2 className="add-transaction-title">Add Transaction</h2>
-                <p className="add-transaction-subtitle">Record a new income or expense transaction</p>
+                <p className="add-transaction-subtitle">Record a new income or expense transaction.</p>
               </div>
               <button className="modal-close-btn" onClick={handleCloseAddTransaction}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -673,21 +812,30 @@ function Transactions() {
 
             <form onSubmit={handleSubmitTransaction} className="add-transaction-form">
               {/* Transaction Type Toggle */}
-              <div className="transaction-type-toggle">
-                <button
-                  type="button"
-                  className={`type-toggle-btn ${formData.type === 'expense' ? 'active' : ''}`}
-                  onClick={() => setFormData(prev => ({ ...prev, type: 'expense', category: '' }))}
-                >
-                  Expense
-                </button>
-                <button
-                  type="button"
-                  className={`type-toggle-btn ${formData.type === 'income' ? 'active' : ''}`}
-                  onClick={() => setFormData(prev => ({ ...prev, type: 'income', category: '' }))}
-                >
-                  Income
-                </button>
+              <div className="form-field">
+                <label className="form-label">Transaction Type</label>
+                <div className="type-toggle">
+                  <button
+                    type="button"
+                    className={`type-toggle-btn ${transactionForm.type === 'expense' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTransactionForm(prev => ({ ...prev, type: 'expense', category: '' }))
+                      setFormErrors(prev => ({ ...prev, category: '' }))
+                    }}
+                  >
+                    Expense
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-toggle-btn ${transactionForm.type === 'income' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTransactionForm(prev => ({ ...prev, type: 'income', category: '' }))
+                      setFormErrors(prev => ({ ...prev, category: '' }))
+                    }}
+                  >
+                    Income
+                  </button>
+                </div>
               </div>
 
               {/* Amount Field */}
@@ -695,20 +843,18 @@ function Transactions() {
                 <label className="form-label">
                   Amount <span className="required">*</span>
                 </label>
-                <div className="amount-input-wrapper">
-                  <span className="amount-prefix">{formatCurrency(0).symbol}</span>
-                  <input
-                    type="number"
-                    name="amount"
-                    className="form-input amount-input"
-                    placeholder=" 0.00"
-                    value={formData.amount}
-                    onChange={handleInputChange}
-                    step="0.01"
-                    min="0"
-                    required
-                  />
-                </div>
+                <input
+                  type="number"
+                  name="amount"
+                  className={`form-input ${formErrors.amount ? 'error' : ''}`}
+                  placeholder="$0.00"
+                  value={transactionForm.amount}
+                  onChange={handleInputChange}
+                  step="0.01"
+                  min="0.01"
+                  required
+                />
+                {formErrors.amount && <span className="error-message">{formErrors.amount}</span>}
               </div>
 
               {/* Category Field */}
@@ -719,8 +865,8 @@ function Transactions() {
                 <div className="select-wrapper">
                   <select
                     name="category"
-                    className="form-select"
-                    value={formData.category}
+                    className={`form-select ${formErrors.category ? 'error' : ''}`}
+                    value={transactionForm.category}
                     onChange={handleInputChange}
                     required
                   >
@@ -735,6 +881,7 @@ function Transactions() {
                     <polyline points="6 9 12 15 18 9"></polyline>
                   </svg>
                 </div>
+                {formErrors.category && <span className="error-message">{formErrors.category}</span>}
               </div>
 
               {/* Date Field */}
@@ -744,21 +891,21 @@ function Transactions() {
                 </label>
                 <div className="date-input-wrapper">
                   <input
-                    type="text"
+                    type="date"
                     name="date"
-                    className="form-input date-input"
-                    placeholder="MM/DD/YYYY"
-                    value={formatDateForInput(formData.date)}
+                    className={`form-input ${formErrors.date ? 'error' : ''}`}
+                    value={formatDateForInput(transactionForm.date)}
                     onChange={handleDateChange}
                     required
                   />
-                  <svg className="date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg className="date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                     <line x1="16" y1="2" x2="16" y2="6"></line>
                     <line x1="8" y1="2" x2="8" y2="6"></line>
                     <line x1="3" y1="10" x2="21" y2="10"></line>
                   </svg>
                 </div>
+                {formErrors.date && <span className="error-message">{formErrors.date}</span>}
               </div>
 
               {/* Description Field */}
@@ -768,13 +915,14 @@ function Transactions() {
                 </label>
                 <textarea
                   name="description"
-                  className="form-textarea"
+                  className={`form-textarea ${formErrors.description ? 'error' : ''}`}
                   placeholder="e.g., Grocery shopping, Monthly rent..."
-                  value={formData.description}
+                  value={transactionForm.description}
                   onChange={handleInputChange}
-                  rows="3"
+                  rows="4"
                   required
                 />
+                {formErrors.description && <span className="error-message">{formErrors.description}</span>}
               </div>
 
               {/* Receipt Upload Field */}
@@ -784,19 +932,41 @@ function Transactions() {
                   <input
                     type="file"
                     id="receipt-upload"
-                    className="file-input"
                     accept="image/*"
                     onChange={handleFileChange}
+                    style={{ display: 'none' }}
                   />
                   <label htmlFor="receipt-upload" className="file-upload-label">
-                    <svg className="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
-                      <polyline points="17 8 12 3 7 8"></polyline>
-                      <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    <span>Click to upload receipt image</span>
-                    {formData.receipt && (
-                      <span className="file-name">{formData.receipt.name}</span>
+                    {transactionForm.receipt ? (
+                      <div className="file-uploaded">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                          <line x1="16" y1="13" x2="8" y2="13"></line>
+                          <line x1="16" y1="17" x2="8" y2="17"></line>
+                          <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                        <span>{transactionForm.receipt.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setTransactionForm(prev => ({ ...prev, receipt: null }))
+                          }}
+                          className="remove-file-btn"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                          <polyline points="17 8 12 3 7 8"></polyline>
+                          <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <span>Click to upload receipt image</span>
+                      </>
                     )}
                   </label>
                 </div>
@@ -821,6 +991,236 @@ function Transactions() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transaction Modal */}
+      {showEditTransactionModal && (
+        <div className="modal-overlay" onClick={handleCloseEditTransaction}>
+          <div className="add-transaction-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-transaction-header">
+              <div>
+                <h2 className="add-transaction-title">Edit Transaction</h2>
+                <p className="add-transaction-subtitle">Update transaction details.</p>
+              </div>
+              <button className="modal-close-btn" onClick={handleCloseEditTransaction}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateTransaction} className="add-transaction-form">
+              {/* Transaction Type Toggle */}
+              <div className="form-field">
+                <label className="form-label">Transaction Type</label>
+                <div className="type-toggle">
+                  <button
+                    type="button"
+                    className={`type-toggle-btn ${transactionForm.type === 'expense' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTransactionForm(prev => ({ ...prev, type: 'expense', category: '' }))
+                      setFormErrors(prev => ({ ...prev, category: '' }))
+                    }}
+                  >
+                    Expense
+                  </button>
+                  <button
+                    type="button"
+                    className={`type-toggle-btn ${transactionForm.type === 'income' ? 'active' : ''}`}
+                    onClick={() => {
+                      setTransactionForm(prev => ({ ...prev, type: 'income', category: '' }))
+                      setFormErrors(prev => ({ ...prev, category: '' }))
+                    }}
+                  >
+                    Income
+                  </button>
+                </div>
+              </div>
+
+              {/* Amount Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Amount <span className="required">*</span>
+                </label>
+                <input
+                  type="number"
+                  name="amount"
+                  className={`form-input ${formErrors.amount ? 'error' : ''}`}
+                  placeholder="$0.00"
+                  value={transactionForm.amount}
+                  onChange={handleInputChange}
+                  step="0.01"
+                  min="0.01"
+                  required
+                />
+                {formErrors.amount && <span className="error-message">{formErrors.amount}</span>}
+              </div>
+
+              {/* Category Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Category <span className="required">*</span>
+                </label>
+                <div className="select-wrapper">
+                  <select
+                    name="category"
+                    className={`form-select ${formErrors.category ? 'error' : ''}`}
+                    value={transactionForm.category}
+                    onChange={handleInputChange}
+                    required
+                  >
+                    <option value="">Select a category</option>
+                    {filteredCategories.map(cat => (
+                      <option key={cat.id} value={cat.name || cat.category}>
+                        {cat.name || cat.category}
+                      </option>
+                    ))}
+                  </select>
+                  <svg className="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </div>
+                {formErrors.category && <span className="error-message">{formErrors.category}</span>}
+              </div>
+
+              {/* Date Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Date <span className="required">*</span>
+                </label>
+                <div className="date-input-wrapper">
+                  <input
+                    type="date"
+                    name="date"
+                    className={`form-input ${formErrors.date ? 'error' : ''}`}
+                    value={formatDateForInput(transactionForm.date)}
+                    onChange={handleDateChange}
+                    required
+                  />
+                  <svg className="date-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </div>
+                {formErrors.date && <span className="error-message">{formErrors.date}</span>}
+              </div>
+
+              {/* Description Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Description <span className="required">*</span>
+                </label>
+                <textarea
+                  name="description"
+                  className={`form-textarea ${formErrors.description ? 'error' : ''}`}
+                  placeholder="e.g., Grocery shopping, Monthly rent..."
+                  value={transactionForm.description}
+                  onChange={handleInputChange}
+                  rows="4"
+                  required
+                />
+                {formErrors.description && <span className="error-message">{formErrors.description}</span>}
+              </div>
+
+              {/* Receipt Upload Field */}
+              <div className="form-field">
+                <label className="form-label">Receipt (Optional)</label>
+                <div className="file-upload-area">
+                  <input
+                    type="file"
+                    id="receipt-upload-edit"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    style={{ display: 'none' }}
+                  />
+                  <label htmlFor="receipt-upload-edit" className="file-upload-label">
+                    {transactionForm.receipt ? (
+                      <div className="file-uploaded">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                          <line x1="16" y1="13" x2="8" y2="13"></line>
+                          <line x1="16" y1="17" x2="8" y2="17"></line>
+                          <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                        <span>{transactionForm.receipt.name}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setTransactionForm(prev => ({ ...prev, receipt: null }))
+                          }}
+                          className="remove-file-btn"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+                          <polyline points="17 8 12 3 7 8"></polyline>
+                          <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <span>Click to upload receipt image</span>
+                      </>
+                    )}
+                  </label>
+                </div>
+              </div>
+
+              {/* Form Actions */}
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="form-btn form-btn-cancel"
+                  onClick={handleCloseEditTransaction}
+                  disabled={updating}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="form-btn form-btn-submit"
+                  disabled={updating}
+                >
+                  {updating ? 'Updating...' : 'Update Transaction'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Transaction Confirmation Modal */}
+      {showDeleteTransactionModal && (
+        <div className="modal-overlay" onClick={cancelDeleteTransaction}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">Delete Transaction?</h2>
+            <p className="modal-message">
+              Are you sure you want to delete this transaction? This action cannot be undone and will permanently remove the transaction from your records.
+            </p>
+            <div className="modal-actions">
+              <button 
+                className="modal-btn modal-btn-cancel" 
+                onClick={cancelDeleteTransaction}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button 
+                className="modal-btn modal-btn-confirm" 
+                onClick={confirmDeleteTransaction}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}

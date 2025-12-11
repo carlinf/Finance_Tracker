@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { signInWithEmail, signInWithGoogle } from '../firebase/auth'
 import { useAuth } from '../contexts/AuthContext'
@@ -13,9 +13,11 @@ function Login() {
   const { currentUser } = useAuth()
 
   // Redirect if already logged in
-  if (currentUser) {
-    navigate('/dashboard')
-  }
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/dashboard')
+    }
+  }, [currentUser, navigate])
 
   const handleSubmit = async (e) => {
     e.preventDefault()

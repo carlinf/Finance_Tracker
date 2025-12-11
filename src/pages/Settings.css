@@ -23,66 +23,6 @@
   margin-bottom: 32px;
   padding-bottom: 24px;
   border-bottom: 1px solid #e5e7eb;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.sidebar-header-content {
-  flex: 1;
-}
-
-/* Hamburger Menu Button */
-.hamburger-btn {
-  display: none;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 8px;
-  color: #1f2937;
-  transition: all 0.2s;
-}
-
-.hamburger-btn:hover {
-  color: #10b981;
-}
-
-.hamburger-btn svg {
-  width: 24px;
-  height: 24px;
-}
-
-/* Menu Overlay */
-.menu-overlay {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 998;
-}
-
-/* Sidebar Close Button */
-.sidebar-close-btn {
-  display: none;
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 8px;
-  color: #6b7280;
-  transition: all 0.2s;
-  align-self: flex-start;
-}
-
-.sidebar-close-btn:hover {
-  color: #1f2937;
-}
-
-.sidebar-close-btn svg {
-  width: 20px;
-  height: 20px;
 }
 
 .sidebar-title {
@@ -183,11 +123,57 @@
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
+  position: relative;
 }
 
 .user-info:hover {
   background: #e5e7eb;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Profile Dropdown */
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  min-width: 160px;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.profile-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #374151;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.profile-dropdown-item:hover {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.profile-dropdown-item svg {
+  width: 18px;
+  height: 18px;
+  color: #6b7280;
+}
+
+.profile-dropdown-item:hover svg {
+  color: #ef4444;
 }
 
 .user-details {
@@ -331,6 +317,58 @@
   border-color: #10b981;
   background: white;
   box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.form-input.error {
+  border-color: #ef4444;
+}
+
+.form-input.error:focus {
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.error-message {
+  font-size: 12px;
+  color: #ef4444;
+  margin-top: 4px;
+}
+
+.required {
+  color: #ef4444;
+}
+
+.form-actions-profile {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.form-btn {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.form-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.form-btn-save {
+  background: #10b981;
+  color: white;
+}
+
+.form-btn-save:hover:not(:disabled) {
+  background: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
 /* Password Section */
@@ -562,39 +600,19 @@
     flex-direction: column;
   }
 
-  .hamburger-btn {
-    display: block;
-  }
-
-  .menu-overlay {
-    display: block;
-  }
-
   .sidebar {
-    width: 280px;
-    height: 100vh;
-    position: fixed;
-    top: 0;
-    left: 0;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease-in-out;
-    z-index: 999;
-    border-right: 1px solid #e5e7eb;
-    padding: 24px;
-    overflow-y: auto;
-  }
-
-  .sidebar.sidebar-open {
-    transform: translateX(0);
+    width: 100%;
+    height: auto;
+    position: relative !important;
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 16px;
+    overflow-y: visible;
   }
 
   .sidebar-header {
     margin-bottom: 20px;
     padding-bottom: 16px;
-  }
-
-  .sidebar-close-btn {
-    display: block;
   }
 
   .sidebar-title {
@@ -638,13 +656,9 @@
   }
 
   .settings-header {
-    flex-direction: row;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 16px;
-  }
-
-  .page-title {
-    flex: 1;
   }
 
   .settings-tabs {
@@ -815,26 +829,43 @@
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 }
 
+.modal-content-wide {
+  max-width: 500px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
 }
 
 .modal-close-btn {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px;
+  padding: 8px;
   color: #6b7280;
   transition: all 0.2s;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 32px;
+  height: 32px;
 }
 
 .modal-close-btn:hover {
+  background: #f3f4f6;
   color: #1f2937;
 }
 
@@ -843,11 +874,14 @@
   height: 20px;
 }
 
-.modal-title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1f2937;
-  margin: 0;
+.change-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.delete-account-modal-content {
+  margin-bottom: 20px;
 }
 
 .modal-message {
@@ -893,54 +927,6 @@
   background: #dc2626;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
-}
-
-.modal-btn-confirm:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.modal-btn-submit {
-  background: #10b981;
-  color: white;
-}
-
-.modal-btn-submit:hover {
-  background: #059669;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-}
-
-.modal-btn-submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.modal-btn-cancel:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.password-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.password-form .form-group {
-  margin-bottom: 0;
-}
-
-.error-message {
-  padding: 10px;
-  margin-bottom: 15px;
-  background-color: #fee2e2;
-  color: #dc2626;
-  border-radius: 6px;
-  font-size: 14px;
-  border: 1px solid #fecaca;
 }
 
 @media (max-width: 480px) {

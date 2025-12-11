@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { signUpWithEmail, signInWithGoogle } from '../firebase/auth'
 import { createUserProfile } from '../firebase/firestore'
@@ -17,9 +17,11 @@ function SignUp() {
   const { currentUser } = useAuth()
 
   // Redirect if already logged in
-  if (currentUser) {
-    navigate('/dashboard')
-  }
+  useEffect(() => {
+    if (currentUser) {
+      navigate('/dashboard')
+    }
+  }, [currentUser, navigate])
 
   const handleChange = (e) => {
     setFormData({

@@ -5,11 +5,12 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   updateProfile,
+  updateEmail,
   updatePassword,
-  deleteUser,
+  onAuthStateChanged,
   reauthenticateWithCredential,
   EmailAuthProvider,
-  onAuthStateChanged
+  deleteUser
 } from 'firebase/auth'
 import { auth } from './config'
 
@@ -65,65 +66,89 @@ export const getCurrentUser = () => {
   return auth.currentUser
 }
 
-// Update password
-export const updateUserPassword = async (currentPassword, newPassword) => {
-  try {
-    const user = auth.currentUser
-    
-    if (!user || !user.email) {
-      return { error: 'No user is currently signed in' }
-    }
+// Auth state observer
+export const onAuthStateChange = (callback) => {
+  return onAuthStateChanged(auth, callback)
+}
 
-    // Re-authenticate user with current password
-    const credential = EmailAuthProvider.credential(user.email, currentPassword)
-    await reauthenticateWithCredential(user, credential)
-    
-    // Update password
-    await updatePassword(user, newPassword)
-    
+// Update user profile (display name)
+export const updateUserProfile = async (displayName) => {
+  try {
+    if (!auth.currentUser) {
+      return { error: 'No user logged in' }
+    }
+    await updateProfile(auth.currentUser, {
+      displayName: displayName
+    })
     return { error: null }
   } catch (error) {
-    let errorMessage = error.message
-    
-    // Provide user-friendly error messages
-    if (error.code === 'auth/wrong-password') {
-      errorMessage = 'Current password is incorrect'
-    } else if (error.code === 'auth/weak-password') {
-      errorMessage = 'New password is too weak. Please use at least 6 characters'
-    } else if (error.code === 'auth/requires-recent-login') {
-      errorMessage = 'Please sign out and sign in again before changing your password'
+    return { error: error.message }
+  }
+}
+
+// Update user email
+export const updateUserEmail = async (newEmail) => {
+  try {
+    if (!auth.currentUser) {
+      return { error: 'No user logged in' }
     }
-    
-    return { error: errorMessage }
+    await updateEmail(auth.currentUser, newEmail)
+    return { error: null }
+  } catch (error) {
+    return { error: error.message }
+  }
+}
+
+// Update user password
+export const updateUserPassword = async (newPassword) => {
+  try {
+    if (!auth.currentUser) {
+      return { error: 'No user logged in' }
+    }
+    await updatePassword(auth.currentUser, newPassword)
+    return { error: null }
+  } catch (error) {
+    return { error: error.message }
+  }
+}
+
+// Re-authenticate user (required before sensitive operations)
+export const reauthenticateUser = async (password) => {
+  try {
+    if (!auth.currentUser || !auth.currentUser.email) {
+      return { error: 'No user logged in' }
+    }
+    const credential = EmailAuthProvider.credential(
+      auth.currentUser.email,
+      password
+    )
+    await reauthenticateWithCredential(auth.currentUser, credential)
+    return { error: null }
+  } catch (error) {
+    return { error: error.message }
   }
 }
 
 // Delete user account
-export const deleteUserAccount = async () => {
+export const deleteUserAccount = async (password) => {
   try {
-    const user = auth.currentUser
-    
-    if (!user) {
-      return { error: 'No user is currently signed in' }
+    if (!auth.currentUser) {
+      return { error: 'No user logged in' }
     }
 
-    // Delete the user account from Firebase Authentication
-    await deleteUser(user)
-    
+    // Re-authenticate before deletion (Firebase requirement)
+    if (password && auth.currentUser.email) {
+      const credential = EmailAuthProvider.credential(
+        auth.currentUser.email,
+        password
+      )
+      await reauthenticateWithCredential(auth.currentUser, credential)
+    }
+
+    // Delete the user account
+    await deleteUser(auth.currentUser)
     return { error: null }
   } catch (error) {
-    let errorMessage = error.message
-    
-    // Provide user-friendly error messages
-    if (error.code === 'auth/requires-recent-login') {
-      errorMessage = 'Please sign out and sign in again before deleting your account'
-    }
-    
-    return { error: errorMessage }
+    return { error: error.message }
   }
-}
-
-// Auth state observer
-export const onAuthStateChange = (callback) => {
-  return onAuthStateChanged(auth, callback)
 }

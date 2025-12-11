@@ -55,9 +55,17 @@ export const updateTransaction = async (transactionId, transactionData) => {
 // Delete a transaction
 export const deleteTransaction = async (transactionId) => {
   try {
-    await deleteDoc(doc(db, TRANSACTIONS_COLLECTION, transactionId))
+    if (!transactionId) {
+      return { error: 'Transaction ID is required' }
+    }
+    
+    const transactionRef = doc(db, TRANSACTIONS_COLLECTION, transactionId)
+    await deleteDoc(transactionRef)
+    
+    console.log('Transaction deleted successfully from Firebase:', transactionId)
     return { error: null }
   } catch (error) {
+    console.error('Error deleting transaction from Firebase:', error)
     return { error: error.message }
   }
 }
@@ -67,21 +75,14 @@ export const getTransactions = async (userId) => {
   try {
     const q = query(
       collection(db, TRANSACTIONS_COLLECTION),
-      where('userId', '==', userId)
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc')
     )
     const querySnapshot = await getDocs(q)
     const transactions = []
     querySnapshot.forEach((doc) => {
       transactions.push({ id: doc.id, ...doc.data() })
     })
-    
-    // Sort manually by createdAt descending
-    transactions.sort((a, b) => {
-      const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : (a.createdAt ? new Date(a.createdAt) : new Date(0))
-      const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : (b.createdAt ? new Date(b.createdAt) : new Date(0))
-      return dateB - dateA // Descending order
-    })
-    
     return { transactions, error: null }
   } catch (error) {
     return { transactions: [], error: error.message }
@@ -90,57 +91,87 @@ export const getTransactions = async (userId) => {
 
 // Subscribe to real-time updates for transactions
 export const subscribeToTransactions = (userId, callback) => {
-  // Query without orderBy to avoid index requirement - we'll sort manually
+  let unsubscribeFn = null
+  let hasSwitchedToFallback = false
+  
+  // Try query with orderBy first (requires index)
   const q = query(
     collection(db, TRANSACTIONS_COLLECTION),
-    where('userId', '==', userId)
+    where('userId', '==', userId),
+    orderBy('createdAt', 'desc')
   )
   
-  return onSnapshot(q, (querySnapshot) => {
+  unsubscribeFn = onSnapshot(q, (querySnapshot) => {
     const transactions = []
     querySnapshot.forEach((doc) => {
-      const data = doc.data()
-      transactions.push({ 
-        id: doc.id, 
-        ...data,
-        // Ensure createdAt is properly handled
-        createdAt: data.createdAt || Timestamp.now()
-      })
+      transactions.push({ id: doc.id, ...doc.data() })
     })
-    
-    // Sort manually by createdAt descending (newest first)
-    transactions.sort((a, b) => {
-      let dateA, dateB
-      
-      // Handle Firestore Timestamp
-      if (a.createdAt?.toDate) {
-        dateA = a.createdAt.toDate()
-      } else if (a.createdAt) {
-        dateA = new Date(a.createdAt)
-      } else {
-        dateA = new Date(0)
-      }
-      
-      if (b.createdAt?.toDate) {
-        dateB = b.createdAt.toDate()
-      } else if (b.createdAt) {
-        dateB = new Date(b.createdAt)
-      } else {
-        dateB = new Date(0)
-      }
-      
-      return dateB - dateA // Descending order (newest first)
-    })
-    
-    console.log('Transactions loaded:', transactions.length)
     callback(transactions)
   }, (error) => {
-    console.error('Error subscribing to transactions:', error)
-    console.error('Error code:', error.code)
-    console.error('Error message:', error.message)
-    alert('Error loading transactions: ' + error.message + '\n\nPlease check:\n1. Firestore security rules are deployed\n2. You are authenticated\n3. Browser console for details')
-    callback([])
+    // Check if it's an index error and we haven't already switched to fallback
+    if (error.code === 'failed-precondition' && error.message.includes('index') && !hasSwitchedToFallback) {
+      hasSwitchedToFallback = true
+      
+      // Extract the index creation URL from the error if available
+      let indexUrl = null
+      if (error.message.includes('https://')) {
+        const urlMatch = error.message.match(/https:\/\/[^\s]+/)
+        if (urlMatch) {
+          indexUrl = urlMatch[0]
+        }
+      }
+      
+      // Show instructions only once per session
+      if (indexUrl && !sessionStorage.getItem('firestore-index-alert-shown')) {
+        sessionStorage.setItem('firestore-index-alert-shown', 'true')
+        console.log('❌ Firestore Index Required!')
+        console.log('🔗 Create the index here:', indexUrl)
+        console.log('📋 The app will use a fallback method until the index is created.')
+        console.log('💡 Click the link above or copy this URL:', indexUrl)
+      }
+      
+      // Fallback: Use query without orderBy and sort client-side
+      console.log('⚠️ Using fallback query (works without index)')
+      
+      // Unsubscribe from the failed query
+      if (unsubscribeFn) {
+        unsubscribeFn()
+      }
+      
+      const fallbackQuery = query(
+        collection(db, TRANSACTIONS_COLLECTION),
+        where('userId', '==', userId)
+      )
+      
+      unsubscribeFn = onSnapshot(fallbackQuery, (querySnapshot) => {
+        const transactions = []
+        querySnapshot.forEach((doc) => {
+          transactions.push({ id: doc.id, ...doc.data() })
+        })
+        // Sort client-side by createdAt descending
+        transactions.sort((a, b) => {
+          const dateA = a.createdAt?.toDate() || new Date(0)
+          const dateB = b.createdAt?.toDate() || new Date(0)
+          return dateB - dateA // Descending order
+        })
+        callback(transactions)
+      }, (fallbackError) => {
+        console.error('Error in fallback query:', fallbackError)
+        callback([])
+      })
+    } else if (!hasSwitchedToFallback) {
+      // Only log non-index errors if we haven't switched to fallback
+      console.error('Error subscribing to transactions:', error)
+      callback([])
+    }
+    // If hasSwitchedToFallback is true, ignore subsequent errors from the original query
   })
+  
+  return () => {
+    if (unsubscribeFn) {
+      unsubscribeFn()
+    }
+  }
 }
 
 // ============ CATEGORIES ============
@@ -177,39 +208,6 @@ export const getCategories = async (userId) => {
   }
 }
 
-// Subscribe to real-time updates for categories
-export const subscribeToCategories = (userId, callback) => {
-  const q = query(
-    collection(db, CATEGORIES_COLLECTION),
-    where('userId', '==', userId)
-  )
-  
-  return onSnapshot(q, (querySnapshot) => {
-    const categories = []
-    querySnapshot.forEach((doc) => {
-      categories.push({ id: doc.id, ...doc.data() })
-    })
-    console.log('Categories loaded:', categories.length)
-    callback(categories)
-  }, (error) => {
-    console.error('Error subscribing to categories:', error)
-    console.error('Error code:', error.code)
-    console.error('Error message:', error.message)
-    alert('Error loading categories: ' + error.message + '\n\nPlease check:\n1. Firestore security rules are deployed\n2. You are authenticated\n3. Browser console for details')
-    callback([])
-  })
-}
-
-// Delete a category
-export const deleteCategory = async (categoryId) => {
-  try {
-    await deleteDoc(doc(db, CATEGORIES_COLLECTION, categoryId))
-    return { error: null }
-  } catch (error) {
-    return { error: error.message }
-  }
-}
-
 // Update a category
 export const updateCategory = async (categoryId, categoryData) => {
   try {
@@ -222,6 +220,35 @@ export const updateCategory = async (categoryId, categoryData) => {
   } catch (error) {
     return { error: error.message }
   }
+}
+
+// Delete a category
+export const deleteCategory = async (categoryId) => {
+  try {
+    await deleteDoc(doc(db, CATEGORIES_COLLECTION, categoryId))
+    return { error: null }
+  } catch (error) {
+    return { error: error.message }
+  }
+}
+
+// Subscribe to real-time updates for categories
+export const subscribeToCategories = (userId, callback) => {
+  const q = query(
+    collection(db, CATEGORIES_COLLECTION),
+    where('userId', '==', userId)
+  )
+  
+  return onSnapshot(q, (querySnapshot) => {
+    const categories = []
+    querySnapshot.forEach((doc) => {
+      categories.push({ id: doc.id, ...doc.data() })
+    })
+    callback(categories)
+  }, (error) => {
+    console.error('Error subscribing to categories:', error)
+    callback([])
+  })
 }
 
 // ============ USER PROFILE ============
@@ -270,61 +297,44 @@ export const getUserProfile = async (userId) => {
   }
 }
 
-// Delete all user data (transactions, categories, and user profile)
+// Delete all user data from Firestore
 export const deleteAllUserData = async (userId) => {
   try {
-    const errors = []
-
     // Delete all transactions
-    try {
-      const transactionsQuery = query(
-        collection(db, TRANSACTIONS_COLLECTION),
-        where('userId', '==', userId)
-      )
-      const transactionsSnapshot = await getDocs(transactionsQuery)
-      const deleteTransactionPromises = transactionsSnapshot.docs.map(doc => 
-        deleteDoc(doc.ref)
-      )
-      await Promise.all(deleteTransactionPromises)
-    } catch (error) {
-      errors.push(`Failed to delete transactions: ${error.message}`)
-    }
+    const transactionsQuery = query(
+      collection(db, TRANSACTIONS_COLLECTION),
+      where('userId', '==', userId)
+    )
+    const transactionsSnapshot = await getDocs(transactionsQuery)
+    const deleteTransactionsPromises = transactionsSnapshot.docs.map(doc => deleteDoc(doc.ref))
+    await Promise.all(deleteTransactionsPromises)
 
     // Delete all categories
-    try {
-      const categoriesQuery = query(
-        collection(db, CATEGORIES_COLLECTION),
-        where('userId', '==', userId)
-      )
-      const categoriesSnapshot = await getDocs(categoriesQuery)
-      const deleteCategoryPromises = categoriesSnapshot.docs.map(doc => 
-        deleteDoc(doc.ref)
-      )
-      await Promise.all(deleteCategoryPromises)
-    } catch (error) {
-      errors.push(`Failed to delete categories: ${error.message}`)
-    }
+    const categoriesQuery = query(
+      collection(db, CATEGORIES_COLLECTION),
+      where('userId', '==', userId)
+    )
+    const categoriesSnapshot = await getDocs(categoriesQuery)
+    const deleteCategoriesPromises = categoriesSnapshot.docs.map(doc => deleteDoc(doc.ref))
+    await Promise.all(deleteCategoriesPromises)
 
     // Delete user profile
-    try {
-      const userProfileQuery = query(
-        collection(db, USERS_COLLECTION),
-        where('userId', '==', userId),
-        limit(1)
-      )
-      const userProfileSnapshot = await getDocs(userProfileQuery)
-      if (!userProfileSnapshot.empty) {
-        const deleteProfilePromises = userProfileSnapshot.docs.map(doc => 
-          deleteDoc(doc.ref)
-        )
-        await Promise.all(deleteProfilePromises)
-      }
-    } catch (error) {
-      errors.push(`Failed to delete user profile: ${error.message}`)
+    const userProfileQuery = query(
+      collection(db, USERS_COLLECTION),
+      where('userId', '==', userId),
+      limit(1)
+    )
+    const userProfileSnapshot = await getDocs(userProfileQuery)
+    if (!userProfileSnapshot.empty) {
+      await deleteDoc(userProfileSnapshot.docs[0].ref)
     }
 
-    if (errors.length > 0) {
-      return { error: errors.join('; ') }
+    // Also try to delete by document ID (in case user profile uses userId as doc ID)
+    try {
+      const userRef = doc(db, USERS_COLLECTION, userId)
+      await deleteDoc(userRef)
+    } catch (error) {
+      // Ignore if document doesn't exist
     }
 
     return { error: null }

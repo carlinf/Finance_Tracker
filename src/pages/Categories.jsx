@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { signOutUser } from '../firebase/auth'
-import { subscribeToCategories, addCategory, deleteCategory } from '../firebase/firestore'
+import { subscribeToCategories, addCategory, deleteCategory, updateCategory } from '../firebase/firestore'
 import './Categories.css'
 
 function Categories() {
@@ -10,13 +10,20 @@ function Categories() {
   const { currentUser } = useAuth()
   const [showSignOutModal, setShowSignOutModal] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false)
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false)
+  const [showEditCategoryModal, setShowEditCategoryModal] = useState(false)
+  const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
+  const [editingCategoryId, setEditingCategoryId] = useState(null)
   const [formData, setFormData] = useState({
     name: '',
     type: 'expense',
     color: '#10b981'
   })
   const [submitting, setSubmitting] = useState(false)
+  const [updating, setUpdating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deletingCategoryId, setDeletingCategoryId] = useState(null)
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -46,7 +53,23 @@ function Categories() {
 
   const handleSignOut = () => {
     setShowSignOutModal(true)
+    setIsProfileDropdownOpen(false)
   }
+
+  const toggleProfileDropdown = () => {
+    setIsProfileDropdownOpen(!isProfileDropdownOpen)
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (isProfileDropdownOpen && !event.target.closest('.user-info')) {
+        setIsProfileDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isProfileDropdownOpen])
 
   const confirmSignOut = async () => {
     const { error } = await signOutUser()
@@ -61,17 +84,91 @@ function Categories() {
   }
 
   const handleEdit = (categoryId) => {
-    // Handle edit functionality
-    console.log('Edit category:', categoryId)
+    const category = categories.find(cat => cat.id === categoryId)
+    if (category) {
+      setEditingCategoryId(categoryId)
+      setFormData({
+        name: category.name || category.category || '',
+        type: category.type || 'expense',
+        color: category.color || '#10b981'
+      })
+      setShowEditCategoryModal(true)
+    }
   }
 
-  const handleDelete = async (categoryId) => {
-    if (window.confirm('Are you sure you want to delete this category?')) {
-      const { error } = await deleteCategory(categoryId)
+  const handleCloseEditCategory = () => {
+    setShowEditCategoryModal(false)
+    setEditingCategoryId(null)
+    setFormData({
+      name: '',
+      type: 'expense',
+      color: '#10b981'
+    })
+  }
+
+  const handleUpdateCategory = async (e) => {
+    e.preventDefault()
+    
+    if (!formData.name.trim()) {
+      alert('Please enter a category name')
+      return
+    }
+
+    if (!currentUser) {
+      alert('You must be logged in to update a category')
+      return
+    }
+
+    setUpdating(true)
+
+    try {
+      const { error } = await updateCategory(editingCategoryId, {
+        name: formData.name.trim(),
+        type: formData.type,
+        color: formData.color
+      })
+      
+      if (error) {
+        alert('Failed to update category: ' + error)
+      } else {
+        handleCloseEditCategory()
+      }
+    } catch (error) {
+      alert('Failed to update category: ' + error.message)
+    } finally {
+      setUpdating(false)
+    }
+  }
+
+  const handleDelete = (categoryId) => {
+    setDeletingCategoryId(categoryId)
+    setShowDeleteCategoryModal(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!deletingCategoryId) return
+
+    setDeleting(true)
+
+    try {
+      const { error } = await deleteCategory(deletingCategoryId)
       if (error) {
         alert('Failed to delete category: ' + error)
+      } else {
+        setShowDeleteCategoryModal(false)
+        setDeletingCategoryId(null)
       }
+      // Category will be automatically removed from the list via the subscription
+    } catch (error) {
+      alert('Failed to delete category: ' + error.message)
+    } finally {
+      setDeleting(false)
     }
+  }
+
+  const cancelDelete = () => {
+    setShowDeleteCategoryModal(false)
+    setDeletingCategoryId(null)
   }
 
   const handleOpenAddCategory = () => {
@@ -228,7 +325,7 @@ function Categories() {
             </svg>
           </button>
           <h1 className="page-title">Categories</h1>
-          <div className="user-info">
+          <div className="user-info" onClick={toggleProfileDropdown}>
             <div className="user-details">
               <span className="user-name">{currentUser?.displayName || 'User'}</span>
               <span className="user-email">{currentUser?.email || ''}</span>
@@ -239,6 +336,18 @@ function Categories() {
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
+            {isProfileDropdownOpen && (
+              <div className="profile-dropdown">
+                <button className="profile-dropdown-item" onClick={handleSignOut}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                  </svg>
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -303,11 +412,19 @@ function Categories() {
                         className="category-action-btn"
                         onClick={() => handleDelete(category.id)}
                         aria-label="Delete category"
+                        disabled={deleting && deletingCategoryId === category.id}
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
-                        </svg>
+                        {deleting && deletingCategoryId === category.id ? (
+                          <svg className="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
+                            <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"></path>
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -361,11 +478,19 @@ function Categories() {
                         className="category-action-btn"
                         onClick={() => handleDelete(category.id)}
                         aria-label="Delete category"
+                        disabled={deleting && deletingCategoryId === category.id}
                       >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
-                        </svg>
+                        {deleting && deletingCategoryId === category.id ? (
+                          <svg className="spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10" strokeOpacity="0.25"></circle>
+                            <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"></path>
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path>
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -495,6 +620,136 @@ function Categories() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Category Modal */}
+      {showEditCategoryModal && (
+        <div className="modal-overlay" onClick={handleCloseEditCategory}>
+          <div className="add-category-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="add-category-header">
+              <h2 className="add-category-title">Edit Category</h2>
+              <button className="modal-close-btn" onClick={handleCloseEditCategory}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateCategory} className="add-category-form">
+              {/* Name Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Name <span className="required">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  className="form-input"
+                  placeholder="Category name"
+                  value={formData.name}
+                  onChange={handleInputChange}
+                  required
+                />
+              </div>
+
+              {/* Type Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Type <span className="required">*</span>
+                </label>
+                <div className="select-wrapper">
+                  <select
+                    name="type"
+                    className="form-select"
+                    value={formData.type}
+                    onChange={handleInputChange}
+                    required
+                  >
+                    <option value="income">Income</option>
+                    <option value="expense">Expense</option>
+                  </select>
+                  <svg className="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </div>
+              </div>
+
+              {/* Color Field */}
+              <div className="form-field">
+                <label className="form-label">
+                  Color <span className="required">*</span>
+                </label>
+                <div className="select-wrapper">
+                  <select
+                    name="color"
+                    className="form-select"
+                    value={formData.color}
+                    onChange={handleInputChange}
+                    required
+                  >
+                    {colorOptions.map(color => (
+                      <option key={color.value} value={color.value}>
+                        {color.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="color-preview" style={{ backgroundColor: formData.color }}></div>
+                  <svg className="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                  </svg>
+                </div>
+              </div>
+
+              {/* Form Actions */}
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="form-btn form-btn-cancel"
+                  onClick={handleCloseEditCategory}
+                  disabled={updating}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="form-btn form-btn-submit"
+                  disabled={updating}
+                >
+                  {updating ? 'Updating...' : 'Update'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Category Confirmation Modal */}
+      {showDeleteCategoryModal && (
+        <div className="modal-overlay" onClick={cancelDelete}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">Delete Category?</h2>
+            <p className="modal-message">
+              Are you sure you want to delete this category? This action cannot be undone and will remove the category from all associated transactions.
+            </p>
+            <div className="modal-actions">
+              <button 
+                className="modal-btn modal-btn-cancel" 
+                onClick={cancelDelete}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button 
+                className="modal-btn modal-btn-confirm" 
+                onClick={confirmDelete}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
