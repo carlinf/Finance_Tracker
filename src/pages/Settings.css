@@ -816,9 +816,30 @@
   }
 
   .settings-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+
+  .page-title {
+    flex: 1;
+    font-size: 24px;
+    min-width: 0;
+  }
+
+  .user-info {
+    flex-shrink: 0;
+  }
+
+  .user-details {
+    display: none;
+  }
+
+  .user-avatar {
+    width: 40px;
+    height: 40px;
   }
 
   .settings-tabs {
@@ -874,8 +895,29 @@
     box-sizing: border-box;
   }
 
+  .settings-header {
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
   .page-title {
     font-size: 20px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .user-info {
+    flex-shrink: 0;
+    padding: 6px;
+  }
+
+  .user-details {
+    display: none;
+  }
+
+  .user-avatar {
+    width: 40px;
+    height: 40px;
   }
 
   .settings-tabs {
@@ -944,20 +986,22 @@
   }
 
   .user-info {
-    padding: 6px 10px;
+    padding: 6px;
+    flex-shrink: 0;
   }
 
-  .user-name {
-    font-size: 13px;
-  }
-
-  .user-email {
-    font-size: 11px;
+  .user-details {
+    display: none;
   }
 
   .user-avatar {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .user-avatar svg {
+    width: 22px;
+    height: 22px;
   }
 
   .user-avatar svg {
